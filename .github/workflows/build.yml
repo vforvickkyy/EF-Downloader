@@ -35,7 +35,7 @@ jobs:
         id: ver
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="1.0.0"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="1.0.1"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Build EastapeDownloader.exe
         run: wails build -platform windows/amd64 -trimpath -skipbindings -ldflags "-s -w -X main.version=${{ steps.ver.outputs.version }}"

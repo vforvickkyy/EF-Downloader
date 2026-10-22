@@ -29,15 +29,23 @@ type Client struct {
 // NewClient returns a client. With an empty apiKey everything goes through
 // Drive's public web pages.
 func NewClient(apiKey string) *Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	// One TCP connection per parallel download instead of HTTP/2 multiplexing
-	// them over a single connection: noticeably faster on Google's servers.
-	tr.ForceAttemptHTTP2 = false
-	tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
-	tr.DialContext = (&net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	tr.TLSHandshakeTimeout = 20 * time.Second
-	tr.ResponseHeaderTimeout = 90 * time.Second
-	tr.MaxIdleConnsPerHost = 16
+	// HTTP/1.1 only: one TCP connection per parallel download instead of
+	// HTTP/2 multiplexing them over a single connection, which is noticeably
+	// faster on Google's servers. A fresh Transport is needed: a clone of
+	// http.DefaultTransport keeps advertising "h2" during the TLS handshake,
+	// Google then answers in HTTP/2, and every response looks malformed.
+	tr := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSClientConfig:       &tls.Config{NextProtos: []string{"http/1.1"}},
+		TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
+		TLSHandshakeTimeout:   20 * time.Second,
+		ResponseHeaderTimeout: 90 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   16,
+	}
 	jar, _ := cookiejar.New(nil)
 	return &Client{
 		http:            &http.Client{Transport: tr, Jar: jar},
@@ -100,3 +108,5 @@ func withRetry[T any](ctx context.Context, fn func() (T, error)) (T, error) {
 	}
 	return v, err
 }
+
+func (c *Client) transport() *http.Transport { return c.http.Transport.(*http.Transport) }

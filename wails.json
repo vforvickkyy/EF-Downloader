@@ -13,7 +13,7 @@
   "info": {
     "companyName": "Eastape",
     "productName": "Eastape Downloader",
-    "productVersion": "1.0.0",
+    "productVersion": "1.0.1",
     "copyright": "Copyright © 2026 Eastape",
     "comments": "Download public Google Drive folders with their folder structure"
   }

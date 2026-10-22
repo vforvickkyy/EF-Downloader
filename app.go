@@ -22,7 +22,7 @@ import (
 const appName = "Eastape Downloader"
 
 // version is set at build time with -ldflags "-X main.version=...".
-var version = "1.0.0"
+var version = "1.0.1"
 
 // App is the bridge between the window (frontend) and the download engine.
 // Its exported methods are callable from JavaScript.
@@ -300,6 +300,10 @@ func (a *App) Scan(input string) (*ScanResult, error) {
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil, errors.New("scan cancelled")
+		}
+		var de *gdrive.Error
+		if !errors.As(err, &de) {
+			return nil, fmt.Errorf("couldn't reach Google Drive. Check your internet connection and try again. (%v)", err)
 		}
 		return nil, err
 	}
