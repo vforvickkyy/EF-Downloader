@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Eastape Downloader",
+  "outputfilename": "EastapeDownloader",
+  "frontend:dir": "frontend",
+  "frontend:install": "",
+  "frontend:build": "",
+  "wailsjsdir": "./frontend/wailsjs",
+  "author": {
+    "name": "Eastape",
+    "email": "vforvickkyy@gmail.com"
+  },
+  "info": {
+    "companyName": "Eastape",
+    "productName": "Eastape Downloader",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2026 Eastape",
+    "comments": "Download public Google Drive folders with their folder structure"
+  }
+}

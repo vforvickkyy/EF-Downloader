@@ -1,0 +1,430 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"eastape/internal/engine"
+	"eastape/internal/gdrive"
+	"eastape/internal/power"
+	"eastape/internal/settings"
+
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+const appName = "Eastape Downloader"
+
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "1.0.0"
+
+// App is the bridge between the window (frontend) and the download engine.
+// Its exported methods are callable from JavaScript.
+type App struct {
+	ctx context.Context
+	mgr *engine.Manager
+
+	mu         sync.Mutex
+	settings   settings.Settings
+	scanCancel context.CancelFunc
+	lastState  engine.State
+	lastTitle  string
+}
+
+// NewApp creates the application.
+func NewApp() *App {
+	a := &App{settings: settings.Load()}
+	a.mgr = engine.NewManager(a.onEngineEvent)
+	a.mgr.SetClient(gdrive.NewClient(a.settings.APIKey))
+	return a
+}
+
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	a.applyTheme(a.settings.Theme)
+}
+
+// beforeClose asks before quitting in the middle of a download.
+func (a *App) beforeClose(ctx context.Context) bool {
+	if !a.mgr.Busy() {
+		return false
+	}
+	answer, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:          runtime.QuestionDialog,
+		Title:         appName,
+		Message:       "Downloads are still in progress.\n\nQuit anyway? Unfinished files will continue from where they stopped next time you download the same link.",
+		Buttons:       []string{"Yes", "No"},
+		DefaultButton: "No",
+		CancelButton:  "No",
+	})
+	if err == nil && answer != "Yes" {
+		return true
+	}
+	a.mgr.Stop()
+	power.Release()
+	return false
+}
+
+// onSecondInstance brings the open window forward when the exe is started
+// again.
+func (a *App) onSecondInstance(options.SecondInstanceData) {
+	if a.ctx == nil {
+		return
+	}
+	runtime.WindowUnminimise(a.ctx)
+	runtime.Show(a.ctx)
+	runtime.WindowSetAlwaysOnTop(a.ctx, true)
+	runtime.WindowSetAlwaysOnTop(a.ctx, false)
+}
+
+func (a *App) shutdown(context.Context) {
+	power.Release()
+}
+
+// onEngineEvent forwards engine events to the window and keeps the title,
+// sleep prevention and "open when done" in step with the job.
+func (a *App) onEngineEvent(name string, data any) {
+	if a.ctx == nil {
+		return
+	}
+	switch name {
+	case "job:tick":
+		t := data.(engine.Tick)
+		a.mu.Lock()
+		prev := a.lastState
+		a.lastState = t.State
+		prevent := a.settings.PreventSleep
+		a.mu.Unlock()
+		if t.State != prev {
+			if t.State == engine.StateRunning && prevent {
+				power.Keep()
+			} else if t.State != engine.StateRunning {
+				power.Release()
+			}
+		}
+		title := appName
+		switch t.State {
+		case engine.StateRunning:
+			title = fmt.Sprintf("%d%% · %s", int(t.Percent), appName)
+		case engine.StatePaused:
+			title = fmt.Sprintf("Paused %d%% · %s", int(t.Percent), appName)
+		}
+		a.mu.Lock()
+		changed := title != a.lastTitle
+		a.lastTitle = title
+		a.mu.Unlock()
+		if changed {
+			runtime.WindowSetTitle(a.ctx, title)
+		}
+	case "job:finished":
+		a.mu.Lock()
+		open := a.settings.OpenWhenDone
+		a.mu.Unlock()
+		if open {
+			a.OpenDownloadFolder()
+		}
+	}
+	runtime.EventsEmit(a.ctx, name, data)
+}
+
+// ---- Settings ----
+
+// GetSettings returns the saved settings.
+func (a *App) GetSettings() settings.Settings {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.settings
+}
+
+// SaveSettings stores and applies new settings.
+func (a *App) SaveSettings(s settings.Settings) (settings.Settings, error) {
+	s = s.Normalize()
+	a.mu.Lock()
+	s.RecentLinks = a.settings.RecentLinks
+	keyChanged := s.APIKey != a.settings.APIKey
+	a.settings = s
+	a.mu.Unlock()
+
+	a.mgr.SetLimit(s.SpeedLimitKB * 1024)
+	a.mgr.SetParallel(s.Parallel)
+	if keyChanged {
+		a.mgr.SetClient(gdrive.NewClient(s.APIKey))
+	}
+	a.applyTheme(s.Theme)
+	return s, settings.Save(s)
+}
+
+// SetSpeedLimit changes the speed cap (KB/s, 0 = unlimited) right away.
+func (a *App) SetSpeedLimit(kb int64) error {
+	if kb < 0 {
+		kb = 0
+	}
+	a.mu.Lock()
+	a.settings.SpeedLimitKB = kb
+	s := a.settings
+	a.mu.Unlock()
+	a.mgr.SetLimit(kb * 1024)
+	return settings.Save(s)
+}
+
+// SetParallel changes how many files download at once, right away.
+func (a *App) SetParallel(n int) error {
+	a.mu.Lock()
+	a.settings.Parallel = n
+	a.settings = a.settings.Normalize()
+	s := a.settings
+	a.mu.Unlock()
+	a.mgr.SetParallel(s.Parallel)
+	return settings.Save(s)
+}
+
+// ChooseFolder lets the user pick the download folder.
+func (a *App) ChooseFolder() (string, error) {
+	cur := a.GetSettings().DownloadDir
+	start := cur
+	for start != "" {
+		if fi, err := os.Stat(start); err == nil && fi.IsDir() {
+			break
+		}
+		parent := filepath.Dir(start)
+		if parent == start {
+			start = ""
+			break
+		}
+		start = parent
+	}
+	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:                "Choose where to save downloads",
+		DefaultDirectory:     start,
+		CanCreateDirectories: true,
+	})
+	if err != nil || dir == "" {
+		return cur, err
+	}
+	a.mu.Lock()
+	a.settings.DownloadDir = dir
+	s := a.settings
+	a.mu.Unlock()
+	return dir, settings.Save(s)
+}
+
+func (a *App) applyTheme(theme string) {
+	if a.ctx == nil {
+		return
+	}
+	switch theme {
+	case "light":
+		runtime.WindowSetLightTheme(a.ctx)
+	case "system":
+		runtime.WindowSetSystemDefaultTheme(a.ctx)
+	default:
+		runtime.WindowSetDarkTheme(a.ctx)
+	}
+}
+
+// TestAPIKey checks an API key without saving it.
+func (a *App) TestAPIKey(key string) (string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", errors.New("enter an API key first")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := gdrive.NewClient(key).TestKey(ctx); err != nil {
+		return "", err
+	}
+	return "Key works. Large folders will now be listed with exact sizes.", nil
+}
+
+// ---- Scanning ----
+
+// NodeInfo is one row of the file tree shown in the window.
+type NodeInfo struct {
+	I        int    `json:"i"`
+	Parent   int    `json:"p"`
+	Name     string `json:"n"`
+	IsFolder bool   `json:"f"`
+	Size     int64  `json:"s"`
+	Mime     string `json:"m"`
+	Depth    int    `json:"d"`
+	Path     string `json:"path"`
+	NA       string `json:"na,omitempty"`
+}
+
+// ScanResult is what Scan returns to the window.
+type ScanResult struct {
+	Title    string      `json:"title"`
+	Nodes    []NodeInfo  `json:"nodes"`
+	UsingAPI bool        `json:"usingAPI"`
+	Warnings []string    `json:"warnings"`
+	Tick     engine.Tick `json:"tick"`
+}
+
+// Scan reads the links and lists everything in them.
+func (a *App) Scan(input string) (*ScanResult, error) {
+	if a.mgr.Busy() {
+		return nil, errors.New("a download is in progress; stop it before opening another link")
+	}
+	links, err := gdrive.ParseLinks(input)
+	if err != nil && len(links) == 0 {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	a.mu.Lock()
+	if a.scanCancel != nil {
+		a.scanCancel()
+	}
+	a.scanCancel = cancel
+	s := a.settings
+	a.mu.Unlock()
+	defer cancel()
+
+	client := gdrive.NewClient(s.APIKey)
+	var lastEmit time.Time
+	var emitMu sync.Mutex
+	res, err := client.Scan(ctx, links, gdrive.DocsFormat(s.DocsFormat), func(p gdrive.ScanProgress) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		if time.Since(lastEmit) > 120*time.Millisecond {
+			lastEmit = time.Now()
+			runtime.EventsEmit(a.ctx, "scan:progress", p)
+		}
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, errors.New("scan cancelled")
+		}
+		return nil, err
+	}
+	a.mgr.SetClient(client)
+	if err := a.mgr.Load(res); err != nil {
+		return nil, err
+	}
+
+	a.mu.Lock()
+	a.settings.AddRecent(strings.TrimSpace(input))
+	saved := a.settings
+	a.mu.Unlock()
+	_ = settings.Save(saved)
+
+	out := &ScanResult{Title: res.Title, UsingAPI: res.UsingAPI, Warnings: res.Warnings, Nodes: make([]NodeInfo, len(res.Nodes))}
+	for i, n := range res.Nodes {
+		out.Nodes[i] = NodeInfo{I: i, Parent: n.Parent, Name: n.Name, IsFolder: n.IsFolder(), Size: n.Size, Mime: n.MimeType, Depth: n.Depth, Path: filepath.ToSlash(n.RelPath), NA: n.NoDownload}
+	}
+	out.Tick = a.mgr.Snapshot()
+	return out, nil
+}
+
+// CancelScan stops a running scan.
+func (a *App) CancelScan() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.scanCancel != nil {
+		a.scanCancel()
+		a.scanCancel = nil
+	}
+}
+
+// ---- Downloading ----
+
+// Start downloads the selected files (indexes into the scanned nodes; empty
+// or null downloads everything).
+func (a *App) Start(selected []int) error {
+	s := a.GetSettings()
+	if err := os.MkdirAll(s.DownloadDir, 0o755); err != nil {
+		return fmt.Errorf("can't use download folder %s: %w", s.DownloadDir, err)
+	}
+	return a.mgr.Start(engine.Options{
+		Dir:       s.DownloadDir,
+		Parallel:  s.Parallel,
+		LimitBps:  s.SpeedLimitKB * 1024,
+		Overwrite: s.Overwrite,
+		Retries:   s.Retries,
+	}, selected)
+}
+
+// Pause pauses all downloads.
+func (a *App) Pause() { a.mgr.Pause() }
+
+// Resume continues paused downloads.
+func (a *App) Resume() { a.mgr.Resume() }
+
+// Stop stops all downloads; Start continues them later.
+func (a *App) Stop() { a.mgr.Stop() }
+
+// RetryFailed downloads the failed files again.
+func (a *App) RetryFailed() error { return a.mgr.RetryFailed() }
+
+// ---- Shell helpers ----
+
+// OpenDownloadFolder opens the folder the current job saves into.
+func (a *App) OpenDownloadFolder() {
+	dir := a.mgr.Dir()
+	if dir == "" {
+		dir = a.GetSettings().DownloadDir
+	}
+	if p, ok := a.mgr.LocalPath(0); ok {
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			dir = p
+		}
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	openPath(dir)
+}
+
+// OpenPath opens a folder in Explorer.
+func (a *App) OpenPath(p string) {
+	if p == "" {
+		p = a.GetSettings().DownloadDir
+	}
+	_ = os.MkdirAll(p, 0o755)
+	openPath(p)
+}
+
+// RevealFile shows a downloaded file in Explorer.
+func (a *App) RevealFile(i int) {
+	p, ok := a.mgr.LocalPath(i)
+	if !ok {
+		return
+	}
+	if _, err := os.Stat(p); err != nil {
+		openPath(filepath.Dir(p))
+		return
+	}
+	revealPath(p)
+}
+
+// OpenURL opens a web page in the default browser.
+func (a *App) OpenURL(u string) {
+	if strings.HasPrefix(u, "https://") {
+		runtime.BrowserOpenURL(a.ctx, u)
+	}
+}
+
+// ClipboardLink returns a Drive link from the clipboard, or "".
+func (a *App) ClipboardLink() string {
+	text, err := runtime.ClipboardGetText(a.ctx)
+	if err != nil {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if len(text) > 4000 {
+		return ""
+	}
+	if links, _ := gdrive.ParseLinks(text); len(links) > 0 && (strings.Contains(text, "drive.google.com") || strings.Contains(text, "docs.google.com")) {
+		return text
+	}
+	return ""
+}
+
+// AppInfo returns the name and version.
+func (a *App) AppInfo() map[string]string {
+	return map[string]string{"name": appName, "version": version}
+}

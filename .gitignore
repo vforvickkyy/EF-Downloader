@@ -1,0 +1,5 @@
+build/bin/
+frontend/wailsjs/
+*.syso
+*.exe
+*.part

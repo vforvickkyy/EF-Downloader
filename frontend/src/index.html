@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Eastape Downloader</title>
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glow glow-a"></div>
+  <div class="glow glow-b"></div>
+
+  <header class="appbar">
+    <div class="brand">
+      <img src="assets/logo.png" alt="" class="brand-logo">
+      <div class="brand-text">
+        <span class="brand-name">Eastape Downloader</span>
+        <span class="brand-sub">Google Drive · public links</span>
+      </div>
+    </div>
+    <div class="appbar-actions">
+      <button class="pill" id="modePill" title="How folders are read"></button>
+      <button class="icon-btn" id="themeBtn" title="Switch theme"></button>
+      <button class="icon-btn" id="settingsBtn" title="Settings" data-icon="settings"></button>
+    </div>
+  </header>
+
+  <main class="content">
+    <!-- Link + destination -->
+    <section class="card link-card">
+      <div class="link-row">
+        <div class="link-input-wrap" id="linkWrap">
+          <span class="link-icon" data-icon="link"></span>
+          <input id="linkInput" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="Paste a Google Drive folder or file link…">
+          <button class="ghost-btn small" id="pasteBtn" title="Paste from clipboard"><span data-icon="clipboard"></span>Paste</button>
+          <div class="recent" id="recentList" hidden></div>
+        </div>
+        <button class="btn primary big" id="scanBtn"><span data-icon="search"></span><span>Scan</span></button>
+      </div>
+      <div class="link-error" id="linkError" hidden></div>
+      <div class="clip-hint" id="clipHint" hidden></div>
+      <div class="dest-row">
+        <span class="dest-label"><span data-icon="hardDrive"></span>Save to</span>
+        <button class="dest-path" id="destPath" title="Change download folder"></button>
+        <button class="ghost-btn small" id="changeDirBtn">Change</button>
+        <button class="ghost-btn small" id="openDirBtn"><span data-icon="folderOpen"></span>Open</button>
+      </div>
+    </section>
+
+    <!-- Empty state -->
+    <section class="empty" id="emptyState">
+      <div class="empty-hero">
+        <div class="empty-logo"><img src="assets/logo.png" alt=""></div>
+        <h1>Download whole Google Drive folders</h1>
+        <p>Paste a public folder link. Eastape rebuilds the same folders on your PC and downloads every file, a few at a time, at the speed you choose.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="step-n">1</span><div><b>Paste a link</b><span>Folder, file, or Docs link shared as “Anyone with the link”.</span></div></div>
+        <div class="step"><span class="step-n">2</span><div><b>Scan</b><span>See every file and folder. Untick anything you don't need.</span></div></div>
+        <div class="step"><span class="step-n">3</span><div><b>Download</b><span>Pause, resume, stop and cap the speed any time.</span></div></div>
+      </div>
+      <div class="empty-foot">
+        <span><span data-icon="check"></span>Keeps folder structure</span>
+        <span><span data-icon="check"></span>Resumes after closing the app</span>
+        <span><span data-icon="check"></span>Docs, Sheets & Slides saved as Office files</span>
+      </div>
+    </section>
+
+    <!-- Scanning -->
+    <section class="card scanning" id="scanState" hidden>
+      <div class="spinner"></div>
+      <div class="scan-text">
+        <b id="scanTitle">Reading folder…</b>
+        <span id="scanStats">Connecting to Google Drive</span>
+      </div>
+      <button class="btn" id="cancelScanBtn"><span data-icon="x"></span>Cancel</button>
+    </section>
+
+    <!-- Job -->
+    <section class="job" id="jobState" hidden>
+      <div class="warnings" id="warnings" hidden></div>
+      <div class="job-top">
+        <div class="card progress-card">
+          <div class="job-head">
+            <div class="job-icon" data-icon="folder"></div>
+            <div class="job-title-wrap">
+              <div class="job-title-row"><span class="job-title" id="jobTitle"></span><span class="job-badge" id="jobBadge"></span></div>
+              <div class="job-chips" id="jobChips"></div>
+            </div>
+            <div class="job-actions" id="jobActions"></div>
+          </div>
+          <div class="bar big"><div class="bar-fill" id="mainBar"></div></div>
+          <div class="job-stats">
+            <div class="stat-main"><span id="pctText">0</span><small>%</small></div>
+            <div class="stat"><span class="stat-k">Downloaded</span><span class="stat-v" id="bytesText">—</span></div>
+            <div class="stat"><span class="stat-k">Files</span><span class="stat-v" id="filesText">—</span></div>
+            <div class="stat"><span class="stat-k">Time left</span><span class="stat-v" id="etaText">—</span></div>
+            <div class="stat"><span class="stat-k">Elapsed</span><span class="stat-v" id="elapsedText">—</span></div>
+            <div class="sel-info" id="selInfo"></div>
+          </div>
+        </div>
+
+        <div class="card speed-card">
+          <div class="speed-head">
+            <div>
+              <div class="speed-k">Speed</div>
+              <div class="speed-v" id="speedText">0 B/s</div>
+            </div>
+            <div class="stepper" title="How many files download at the same time">
+              <span class="stepper-k" data-icon="layers"></span>
+              <button id="parMinus" class="step-btn" data-icon="minus" title="Fewer files at once"></button>
+              <span id="parValue">3</span>
+              <button id="parPlus" class="step-btn" data-icon="plus" title="More files at once"></button>
+            </div>
+          </div>
+          <canvas id="speedGraph" class="speed-graph"></canvas>
+          <div class="ctrl-row">
+            <span class="ctrl-k"><span data-icon="zap"></span>Speed limit</span>
+            <button class="ctrl-v" id="limitValue" title="Click to type an exact limit"></button>
+          </div>
+          <input type="range" id="limitRange" min="0" max="14" step="1" class="range">
+        </div>
+      </div>
+
+      <div class="card files-card">
+        <div class="files-head">
+          <label class="check-all" title="Select all">
+            <input type="checkbox" id="checkAll"><span class="cb"></span>
+          </label>
+          <div class="tabs" id="tabs"></div>
+          <div class="files-tools">
+            <div class="search">
+              <span data-icon="search"></span>
+              <input id="searchInput" type="text" placeholder="Filter files" spellcheck="false">
+            </div>
+            <button class="icon-btn small" id="expandBtn" title="Expand all" data-icon="expand"></button>
+            <button class="icon-btn small" id="collapseBtn" title="Collapse all" data-icon="collapse"></button>
+          </div>
+        </div>
+        <div class="list-cols">
+          <span>Name</span><span>Size</span><span>Status</span><span></span>
+        </div>
+        <div class="list" id="list">
+          <div class="list-spacer" id="listSpacer"></div>
+          <div class="list-empty" id="listEmpty" hidden>Nothing here</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Settings drawer -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <h2>Settings</h2>
+      <span class="saved" id="savedNote">Saved</span>
+      <button class="icon-btn" id="closeDrawer" data-icon="x" title="Close"></button>
+    </div>
+    <div class="drawer-body">
+      <section class="set-sec">
+        <h3>Downloads</h3>
+        <div class="set-row col">
+          <span class="set-k">Download folder</span>
+          <div class="set-path"><span id="setDir"></span><button class="ghost-btn small" id="setDirBtn">Change</button></div>
+        </div>
+        <div class="set-row col">
+          <span class="set-k">If a file is already there</span>
+          <div class="seg" id="segOverwrite">
+            <button data-v="skip">Skip it</button>
+            <button data-v="overwrite">Download again</button>
+          </div>
+          <span class="set-hint">Skipping makes re-running a link fetch only new or missing files.</span>
+        </div>
+        <div class="set-row col">
+          <span class="set-k">Save Google Docs, Sheets & Slides as</span>
+          <div class="seg" id="segDocs">
+            <button data-v="office">Word / Excel / PowerPoint</button>
+            <button data-v="pdf">PDF</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <span class="set-k">Retry a failed file</span>
+          <select id="setRetries" class="select">
+            <option value="0">Never</option><option value="1">1 time</option><option value="2">2 times</option>
+            <option value="3">3 times</option><option value="5">5 times</option>
+          </select>
+        </div>
+        <label class="set-row toggle-row">
+          <span><span class="set-k">Keep PC awake while downloading</span><span class="set-hint">Stops Windows from sleeping mid-download.</span></span>
+          <input type="checkbox" id="setSleep"><span class="toggle"></span>
+        </label>
+        <label class="set-row toggle-row">
+          <span><span class="set-k">Open folder when finished</span></span>
+          <input type="checkbox" id="setOpenDone"><span class="toggle"></span>
+        </label>
+      </section>
+
+      <section class="set-sec">
+        <h3>Google API key <span class="opt">optional</span></h3>
+        <p class="set-p">Everything works without a key. A free key from Google makes very large folders list reliably, shows exact sizes before you start, and scans faster.</p>
+        <div class="key-row">
+          <div class="key-input">
+            <span data-icon="key"></span>
+            <input id="setKey" type="password" spellcheck="false" autocomplete="off" placeholder="AIza…">
+            <button class="icon-btn small" id="keyEye" data-icon="eye" title="Show"></button>
+          </div>
+          <button class="btn" id="keyTest">Test</button>
+          <button class="btn primary" id="keySave">Save</button>
+        </div>
+        <div class="key-result" id="keyResult" hidden></div>
+        <details class="howto">
+          <summary>How to get a free key (about 2 minutes)</summary>
+          <ol>
+            <li>Open <a href="#" data-url="https://console.cloud.google.com/projectcreate">Google Cloud Console</a> and create a project (any name).</li>
+            <li>Turn on the <a href="#" data-url="https://console.cloud.google.com/apis/library/drive.googleapis.com">Google Drive API</a> for it.</li>
+            <li>Go to <a href="#" data-url="https://console.cloud.google.com/apis/credentials">Credentials</a> → <b>Create credentials</b> → <b>API key</b>.</li>
+            <li>Copy the key, paste it above, then Test and Save.</li>
+          </ol>
+          <span class="set-hint">The key only reads public files. No sign-in, no billing needed.</span>
+        </details>
+      </section>
+
+      <section class="set-sec">
+        <h3>Appearance</h3>
+        <div class="seg" id="segTheme">
+          <button data-v="dark"><span data-icon="moon"></span>Dark</button>
+          <button data-v="light"><span data-icon="sun"></span>Light</button>
+          <button data-v="system"><span data-icon="monitor"></span>System</button>
+        </div>
+      </section>
+
+      <section class="set-sec about">
+        <img src="assets/logo.png" alt="">
+        <div>
+          <b>Eastape Downloader</b>
+          <span id="aboutVersion"></span>
+          <span class="set-hint">For publicly shared Google Drive links. Private use.</span>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <!-- Speed limit dialog -->
+  <div class="modal" id="limitModal" hidden>
+    <div class="modal-box">
+      <h3>Exact speed limit</h3>
+      <div class="limit-input">
+        <input type="number" id="limitInput" min="0" step="0.1">
+        <select id="limitUnit" class="select">
+          <option value="1024">KB/s</option>
+          <option value="1048576" selected>MB/s</option>
+        </select>
+      </div>
+      <span class="set-hint">0 means unlimited.</span>
+      <div class="modal-actions">
+        <button class="btn" id="limitCancel">Cancel</button>
+        <button class="btn primary" id="limitApply">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
