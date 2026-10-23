@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -16,6 +15,13 @@ import (
 var assets embed.FS
 
 func main() {
+	// The installer runs the app once with this flag to report the
+	// installation; no window opens.
+	if len(os.Args) > 1 && os.Args[1] == "--report-install" {
+		reportInstall()
+		return
+	}
+
 	app := NewApp()
 
 	theme := windows.Dark
@@ -69,6 +75,7 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatal(err)
+		fatalDialog(appName, "Eastape Downloader couldn't start.\n\nPlease restart your computer and try again. If this keeps happening, reinstall Eastape Downloader or contact support from the Settings screen.")
+		os.Exit(1)
 	}
 }

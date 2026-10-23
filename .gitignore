@@ -3,3 +3,5 @@ frontend/wailsjs/
 *.syso
 *.exe
 *.part
+relay.env
+build/windows/installer/license.txt

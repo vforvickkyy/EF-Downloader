@@ -226,11 +226,11 @@ func parseFolderPage(body []byte) (string, []webEntry, error) {
 	}
 	raw, err := jsUnescape(string(m[1]))
 	if err != nil {
-		return "", nil, newErr(ErrParse, 0, "Couldn't decode the folder page: %v", err)
+		return "", nil, newErr(ErrParse, 0, errParseFolderMsg)
 	}
 	var arr []any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
-		return "", nil, newErr(ErrParse, 0, "Couldn't decode the folder page: %v", err)
+		return "", nil, newErr(ErrParse, 0, errParseFolderMsg)
 	}
 	var entries []webEntry
 	if len(arr) > 0 {

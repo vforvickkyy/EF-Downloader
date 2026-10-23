@@ -55,6 +55,10 @@
     history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>',
     skip: '<path d="m5 4 10 8-10 8V4zM19 5v14"/>',
     ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+    help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
+    send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
   };
   const FILLED = new Set(['play', 'pause', 'stop']);
   const icon = (name, cls = '') => `<svg class="i${FILLED.has(name) ? ' fill' : ''} ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -189,11 +193,7 @@
     $('destPath').textContent = s.downloadDir;
     $('destPath').title = s.downloadDir;
     $('setDir').textContent = s.downloadDir;
-    const pill = $('modePill');
-    const api_ = !!s.apiKey;
-    pill.className = `pill${api_ ? ' api' : ''}`;
-    pill.innerHTML = `<span class="dot"></span>${api_ ? 'API key on' : 'No-key mode'}`;
-    pill.title = api_ ? 'Folders are listed with your Google API key' : 'Folders are read from public Drive pages. Add a free API key in Settings for very large folders.';
+    renderProfile();
     setSeg('segOverwrite', s.overwrite ? 'overwrite' : 'skip');
     setSeg('segDocs', s.docsFormat);
     setSeg('segTheme', s.theme);
@@ -510,7 +510,7 @@
     const chips = [];
     chips.push(`<span class="chip">${icon('file')}${fmtNum(f.total)} file${f.total === 1 ? '' : 's'}</span>`);
     if (folders > 1) chips.push(`<span class="chip">${icon('folder')}${fmtNum(folders)} folders</span>`);
-    const sizeHint = "Without an API key Google doesn't list file sizes. Each size appears when its file starts downloading.";
+    const sizeHint = "Google doesn't list file sizes for public folders. Each size appears when its file starts downloading.";
     if (t.totalBytes > 0) chips.push(`<span class="chip${t.unknownSize ? ' hint' : ''}"${t.unknownSize ? ` title="${esc(sizeHint)}"` : ''}>${icon('hardDrive')}${fmtBytes(t.totalBytes)}${t.unknownSize ? '+' : ''}</span>`);
     else if (t.unknownSize > 0) chips.push(`<span class="chip hint" title="${esc(sizeHint)}">${icon('info')}Sizes appear while downloading</span>`);
     if (f.na) chips.push(`<span class="chip hint" title="Google Forms and similar items have no downloadable file.">${icon('ban')}${f.na} can't download</span>`);
@@ -905,9 +905,13 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!$('limitModal').hidden) $('limitModal').hidden = true;
+      if (!$('docModal').hidden) $('docModal').hidden = true;
+      else if (!$('supportModal').hidden) closeSupport();
+      else if (!$('regModal').hidden) { if (!S.regFirst) $('regModal').hidden = true; }
+      else if (!$('limitModal').hidden) $('limitModal').hidden = true;
       else if ($('drawer').classList.contains('open')) closeDrawer();
     }
+    if (!$('regModal').hidden || !$('supportModal').hidden) return;
     const tag = (document.activeElement && document.activeElement.tagName) || '';
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
       linkInput.value = '';
@@ -963,7 +967,8 @@
 
   // ---------------------------------------------------------------- settings drawer
   $('settingsBtn').onclick = () => openDrawer();
-  $('modePill').onclick = () => openDrawer(true);
+  $('helpBtn').onclick = () => openSupport();
+  $('openSupport').onclick = () => openSupport();
   $('closeDrawer').onclick = closeDrawer;
   $('scrim').onclick = closeDrawer;
   $('themeBtn').onclick = () => {
@@ -1005,7 +1010,7 @@
   $('keySave').onclick = async () => {
     const key = $('setKey').value.trim();
     await saveSettings({ apiKey: key });
-    keyResult(true, key ? 'Saved. It will be used from the next scan.' : 'Key removed. Using no-key mode.');
+    keyResult(true, key ? 'Saved. It will be used from the next scan.' : 'Key removed.');
   };
   document.querySelectorAll('[data-url]').forEach((a) => {
     a.addEventListener('click', (e) => { e.preventDefault(); api.OpenURL(a.dataset.url); });
@@ -1027,20 +1032,207 @@
 
   window.addEventListener('resize', () => { queueList(); drawGraph(); });
 
+  // ---------------------------------------------------------------- profile & registration
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+  function renderProfile() {
+    const s = S.settings;
+    const name = (s.userName || '').trim();
+    $('profileName').textContent = name || 'Not registered yet';
+    $('profileEmail').textContent = s.userEmail || '';
+    const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
+    $('profileAvatar').textContent = initials;
+  }
+
+  function openRegistration(first) {
+    const s = S.settings;
+    S.regFirst = first;
+    $('regName').value = s.userName || '';
+    $('regEmail').value = s.userEmail || '';
+    $('regTitle').textContent = first ? "Welcome! Let's get you set up" : 'Edit your profile';
+    $('regIntro').textContent = first
+      ? 'Tell us who you are to start using Eastape Downloader. It only takes a moment.'
+      : 'Update the name and email we use to reply to you.';
+    $('regAgreeLine').hidden = !first;
+    $('regAgree').checked = !first;
+    $('regCancel').hidden = first;
+    $('regSubmit').textContent = first ? 'Get started' : 'Save';
+    $('regError').hidden = true;
+    ['regName', 'regEmail'].forEach((id) => $(id).classList.remove('bad'));
+    $('regAgreeLine').classList.remove('bad');
+    $('regModal').hidden = false;
+    setTimeout(() => $(first || !s.userName ? 'regName' : 'regEmail').focus(), 60);
+  }
+
+  function formError(id, msg) {
+    const el = $(id);
+    el.textContent = msg;
+    el.hidden = !msg;
+  }
+
+  $('regForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('regName').value.trim().replace(/\s+/g, ' ');
+    const email = $('regEmail').value.trim();
+    $('regName').classList.toggle('bad', name.length < 2);
+    $('regEmail').classList.toggle('bad', !EMAIL_RE.test(email));
+    $('regAgreeLine').classList.toggle('bad', S.regFirst && !$('regAgree').checked);
+    if (name.length < 2) return formError('regError', 'Please enter your name.');
+    if (!EMAIL_RE.test(email)) return formError('regError', 'Please enter a valid email address.');
+    if (S.regFirst && !$('regAgree').checked) return formError('regError', 'Please accept the Terms and Conditions, Privacy Policy and Disclaimer to continue.');
+    formError('regError', '');
+    const btn = $('regSubmit');
+    btn.disabled = true;
+    try {
+      S.settings = await api.Register(name, email);
+      const first = S.regFirst;
+      $('regModal').hidden = true;
+      renderProfile();
+      if (first) toast('ok', `Welcome, ${name.split(' ')[0]}!`, "You're all set. Paste a Google Drive link to begin.");
+      else toast('ok', 'Profile updated');
+    } catch (err) {
+      formError('regError', errText(err));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('regCancel').onclick = () => { if (!S.regFirst) $('regModal').hidden = true; };
+  $('profileEdit').onclick = () => openRegistration(!S.settings.registeredAt);
+
+  // ---------------------------------------------------------------- contact support
+  function openSupport() {
+    $('supName').value = S.settings.userName || '';
+    $('supEmail').value = S.settings.userEmail || '';
+    $('supMessage').value = S.supportDraft || '';
+    formError('supError', '');
+    ['supName', 'supEmail', 'supMessage'].forEach((id) => $(id).classList.remove('bad'));
+    $('supportForm').hidden = false;
+    $('supportSent').hidden = true;
+    $('supportModal').hidden = false;
+    setTimeout(() => $(S.settings.userName ? 'supMessage' : 'supName').focus(), 60);
+  }
+  function closeSupport() { $('supportModal').hidden = true; }
+  $('supportClose').onclick = closeSupport;
+  $('supportCancel').onclick = closeSupport;
+  $('sentClose').onclick = closeSupport;
+  $('supMessage').addEventListener('input', (e) => { S.supportDraft = e.target.value; });
+  $('supportForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const req = {
+      name: $('supName').value.trim(),
+      email: $('supEmail').value.trim(),
+      topic: $('supTopic').value,
+      message: $('supMessage').value.trim(),
+      includeDetails: $('supDetails').checked,
+    };
+    $('supName').classList.toggle('bad', req.name.length < 2);
+    $('supEmail').classList.toggle('bad', !EMAIL_RE.test(req.email));
+    $('supMessage').classList.toggle('bad', req.message.length < 10);
+    if (req.name.length < 2) return formError('supError', 'Please enter your name.');
+    if (!EMAIL_RE.test(req.email)) return formError('supError', 'Please enter a valid email address so we can reply.');
+    if (req.message.length < 10) return formError('supError', 'Please describe your question in a few words.');
+    formError('supError', '');
+    const btn = $('supportSend');
+    btn.disabled = true;
+    btn.lastChild.textContent = 'Sending…';
+    try {
+      const r = await api.SendSupport(req);
+      S.supportDraft = '';
+      $('sentTitle').textContent = r === 'sent' ? 'Message sent' : 'Message saved';
+      $('sentText').textContent = r === 'sent'
+        ? "Thanks for reaching out. We'll reply to your email as soon as we can."
+        : "You seem to be offline. We'll send your message automatically as soon as you're connected.";
+      $('supportForm').hidden = true;
+      $('supportSent').hidden = false;
+    } catch (err) {
+      formError('supError', errText(err));
+    } finally {
+      btn.disabled = false;
+      btn.lastChild.textContent = 'Send message';
+    }
+  });
+
+  // ---------------------------------------------------------------- legal documents
+  const docCache = {};
+  function renderMd(md) {
+    const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    let html = '', para = [], list = null, code = null;
+    const flushPara = () => {
+      if (!para.length) return;
+      const text = para.join(' ');
+      html += `<p${/^Eastape Downloader · /.test(text) ? ' class="meta"' : ''}>${inline(text)}</p>`;
+      para = [];
+    };
+    const flushList = () => {
+      if (list) html += `<ul>${list.map((i) => `<li>${inline(i)}</li>`).join('')}</ul>`;
+      list = null;
+    };
+    for (const line of md.replace(/\r/g, '').split('\n')) {
+      if (code) {
+        if (line.startsWith('```')) { html += `<pre>${esc(code.join('\n'))}</pre>`; code = null; } else code.push(line);
+        continue;
+      }
+      if (line.startsWith('```')) { flushPara(); flushList(); code = []; continue; }
+      const h = line.match(/^(#{1,3}) (.*)/);
+      if (h) { flushPara(); flushList(); html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; continue; }
+      const li = line.match(/^- (.*)/);
+      if (li) { flushPara(); (list = list || []).push(li[1]); continue; }
+      if (!line.trim()) { flushPara(); flushList(); continue; }
+      para.push(line.trim());
+    }
+    flushPara();
+    flushList();
+    return html;
+  }
+  async function openDoc(name) {
+    $('docModal').hidden = false;
+    $('docTabs').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.doc === name));
+    const body = $('docBody');
+    if (!docCache[name]) {
+      body.innerHTML = '<p class="meta">Loading…</p>';
+      try {
+        const r = await fetch(`legal/${name}.md`);
+        docCache[name] = renderMd(await r.text());
+      } catch (e) {
+        body.innerHTML = '<p>This document could not be opened. Please reinstall Eastape Downloader.</p>';
+        return;
+      }
+    }
+    body.innerHTML = docCache[name];
+    body.scrollTop = 0;
+  }
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-doc]');
+    if (!a) return;
+    e.preventDefault();
+    openDoc(a.dataset.doc);
+  });
+  $('docClose').onclick = () => { $('docModal').hidden = true; };
+  $('docModal').addEventListener('mousedown', (e) => { if (e.target.id === 'docModal') $('docModal').hidden = true; });
+
+  // Tap the logo in About five times.
+  let logoTaps = 0, logoTimer;
+  $('aboutLogo').addEventListener('click', () => {
+    clearTimeout(logoTimer);
+    logoTimer = setTimeout(() => { logoTaps = 0; }, 2500);
+    if (++logoTaps >= 5) { $('credits').hidden = false; logoTaps = 0; }
+  });
+
   // ---------------------------------------------------------------- start
   async function init() {
     hydrateIcons();
     try {
       S.settings = await api.GetSettings();
       const info = await api.AppInfo();
-      $('aboutVersion').textContent = `Version ${info.version}`;
+      $('aboutVersion').textContent = `Version ${info.shortVersion} · ${info.language}`;
     } catch (e) {
       S.settings = { downloadDir: '', speedLimitKB: 0, parallel: 3, theme: 'dark', docsFormat: 'office', retries: 3, recentLinks: [] };
     }
     applyTheme(S.settings.theme);
     renderSettingsBits();
     setPhase('empty');
-    offerClipboard();
+    if (!S.settings.registeredAt) openRegistration(true);
+    else offerClipboard();
   }
   init();
 })();

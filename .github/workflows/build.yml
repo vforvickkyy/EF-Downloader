@@ -29,22 +29,40 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+      - name: Install Wails and NSIS
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+          if ! command -v makensis >/dev/null; then
+            if [[ -x "/c/Program Files (x86)/NSIS/makensis.exe" ]]; then
+              echo "/c/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
+            else
+              choco install nsis -y --no-progress
+              echo "/c/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
+            fi
+          fi
       - name: Version
         id: ver
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="1.0.1"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="$(sed -n 's/.*"productVersion": *"\([^"]*\)".*/\1/p' wails.json)"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - name: Build EastapeDownloader.exe
-        run: wails build -platform windows/amd64 -trimpath -skipbindings -ldflags "-s -w -X main.version=${{ steps.ver.outputs.version }}"
+      - name: Build app and installer
+        shell: bash
+        env:
+          EASTAPE_RELAY_URL: ${{ secrets.EASTAPE_RELAY_URL }}
+          EASTAPE_RELAY_TOKEN: ${{ secrets.EASTAPE_RELAY_TOKEN }}
+        run: ./scripts/build-windows.sh "${{ steps.ver.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: EastapeDownloader-windows
-          path: build/bin/EastapeDownloader.exe
+          name: EastapeDownloader-${{ steps.ver.outputs.version }}-windows
+          path: |
+            build/bin/EastapeDownloader-Setup-*.exe
+            build/bin/EastapeDownloader.exe
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/bin/EastapeDownloader.exe
+          files: |
+            build/bin/EastapeDownloader-Setup-*.exe
+            build/bin/EastapeDownloader.exe

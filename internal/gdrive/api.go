@@ -74,7 +74,7 @@ func apiErr(status int, body []byte) error {
 	case strings.Contains(reasons, "API_KEY_SERVICE_BLOCKED"), strings.Contains(reasons, "API_KEY_HTTP_REFERRER_BLOCKED"), strings.Contains(reasons, "API_KEY_IP_ADDRESS_BLOCKED"):
 		return newErr(ErrBadKey, status, "Your API key is restricted and can't call the Drive API. Remove the restriction or allow \"Google Drive API\" for it.")
 	case strings.Contains(reasons, "RATE_LIMIT_EXCEEDED"), strings.Contains(reasons, "rateLimitExceeded"), strings.Contains(reasons, "userRateLimitExceeded"), status == 429:
-		return newErr(ErrTransient, status, "Google is rate limiting requests; retrying")
+		return newErr(ErrTransient, status, "Google Drive is busy right now")
 	case strings.Contains(reasons, "exportSizeLimitExceeded"):
 		return newErr(ErrNotDownloadable, status, "Too large for the API to convert")
 	case strings.Contains(reasons, "cannotDownloadAbusiveFile"):
@@ -84,11 +84,7 @@ func apiErr(status int, body []byte) error {
 	case status == 404 || strings.Contains(reasons, "notFound"):
 		return errNotFound(status)
 	}
-	e := statusErr(status)
-	if msg != "" && e.Kind == ErrTransient {
-		e.Msg += ": " + msg
-	}
-	return e
+	return statusErr(status)
 }
 
 func (c *Client) apiRequest(ctx context.Context, path string, q url.Values, resourceKeys ...string) (*http.Request, error) {

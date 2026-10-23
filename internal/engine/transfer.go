@@ -16,7 +16,19 @@ import (
 // so it can be retried instead of hanging forever.
 var stallTimeout = 60 * time.Second
 
-var errStalled = errors.New("connection stalled")
+var (
+	errStalled    = errors.New("connection stalled")
+	errIncomplete = errors.New("download ended early")
+)
+
+// FolderError means a folder couldn't be created in the download location.
+type FolderError struct {
+	Path string
+	Err  error
+}
+
+func (e *FolderError) Error() string { return fmt.Sprintf("can't create folder %s: %v", e.Path, e.Err) }
+func (e *FolderError) Unwrap() error { return e.Err }
 
 // localError is a problem on this computer (disk full, no permission):
 // retrying won't help.
@@ -33,21 +45,29 @@ func retryable(err error) bool {
 	return gdrive.Retryable(err)
 }
 
+// errorText is the message shown next to a failed file. Technical details
+// go to Manager.OnFileError instead.
 func errorText(err error) string {
 	var le *localError
 	if errors.As(err, &le) {
-		if isDiskFull(le.err) {
+		switch {
+		case isDiskFull(le.err):
 			return "Not enough disk space"
+		case errors.Is(le.err, os.ErrPermission):
+			return "No permission to save here. Choose another download folder."
 		}
-		var pe *os.PathError
-		if errors.As(le.err, &pe) {
-			return fmt.Sprintf("Can't write file: %v", pe.Err)
-		}
+		return "Couldn't save the file on this computer"
 	}
-	if errors.Is(err, errStalled) {
-		return "Connection stalled"
+	var ge *gdrive.Error
+	switch {
+	case errors.Is(err, errStalled):
+		return "The connection stopped responding"
+	case errors.Is(err, errIncomplete):
+		return "The download was interrupted"
+	case errors.As(err, &ge):
+		return ge.Msg
 	}
-	return err.Error()
+	return "Network problem. Check your internet connection."
 }
 
 func joinPath(dir, rel string) string { return filepath.Join(dir, rel) }
@@ -75,7 +95,7 @@ func (m *Manager) makeFolders() error {
 			continue
 		}
 		if err := os.MkdirAll(joinPath(m.opts.Dir, n.RelPath), 0o755); err != nil {
-			return fmt.Errorf("can't create folder %s: %w", n.RelPath, err)
+			return &FolderError{Path: n.RelPath, Err: err}
 		}
 	}
 	return nil
@@ -197,7 +217,7 @@ func (m *Manager) transfer(ctx context.Context, f *file) error {
 		return copyErr
 	}
 	if total := f.size.Load(); total >= 0 && written != total {
-		return fmt.Errorf("download ended early (%d of %d bytes)", written, total)
+		return fmt.Errorf("%w (%d of %d bytes)", errIncomplete, written, total)
 	}
 	f.size.Store(written)
 	return m.finish(f, part, final)

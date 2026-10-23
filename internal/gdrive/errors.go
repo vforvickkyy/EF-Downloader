@@ -75,11 +75,11 @@ func statusErr(status int) *Error {
 	case status == 404:
 		return errNotFound(status)
 	case status == 416:
-		return newErr(ErrRange, status, "Server refused to resume")
+		return newErr(ErrRange, status, "Couldn't continue the earlier download")
 	case status == 429:
-		return newErr(ErrTransient, status, "Google is rate limiting (HTTP 429)")
+		return newErr(ErrTransient, status, "Google Drive is busy right now")
 	case status >= 500:
-		return newErr(ErrTransient, status, "Google server error (HTTP %d)", status)
+		return newErr(ErrTransient, status, "Google Drive had a temporary problem")
 	}
-	return newErr(ErrTransient, status, "Unexpected response (HTTP %d)", status)
+	return newErr(ErrTransient, status, "Google Drive sent an unexpected answer")
 }

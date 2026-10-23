@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"eastape/internal/engine"
+	"eastape/internal/feedback"
 	"eastape/internal/gdrive"
 	"eastape/internal/power"
 	"eastape/internal/settings"
@@ -19,16 +20,24 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appName = "Eastape Downloader"
+const (
+	appName   = "Eastape Downloader"
+	company   = "Eastape Tech"
+	slogan    = "Made by Creators, for Creators"
+	copyright = "© 2026 Eastape Tech. All rights reserved."
+)
 
 // version is set at build time with -ldflags "-X main.version=...".
-var version = "1.0.1"
+var version = "1.1.0"
 
 // App is the bridge between the window (frontend) and the download engine.
 // Its exported methods are callable from JavaScript.
 type App struct {
 	ctx context.Context
 	mgr *engine.Manager
+
+	outbox *feedback.Outbox
+	diag   *diagLog
 
 	mu         sync.Mutex
 	settings   settings.Settings
@@ -39,8 +48,9 @@ type App struct {
 
 // NewApp creates the application.
 func NewApp() *App {
-	a := &App{settings: settings.Load()}
+	a := &App{settings: settings.Load(), outbox: feedback.OpenOutbox(outboxPath()), diag: &diagLog{}}
 	a.mgr = engine.NewManager(a.onEngineEvent)
+	a.mgr.OnFileError = func(path string, err error) { a.diag.add("download "+path, err) }
 	a.mgr.SetClient(gdrive.NewClient(a.settings.APIKey))
 	return a
 }
@@ -48,11 +58,14 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.applyTheme(a.settings.Theme)
+	go a.initIdentity()
+	go a.retryOutbox()
 }
 
 // beforeClose asks before quitting in the middle of a download.
 func (a *App) beforeClose(ctx context.Context) bool {
 	if !a.mgr.Busy() {
+		a.flushBeforeExit()
 		return false
 	}
 	answer, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
@@ -68,6 +81,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	}
 	a.mgr.Stop()
 	power.Release()
+	a.flushBeforeExit()
 	return false
 }
 
@@ -146,7 +160,7 @@ func (a *App) GetSettings() settings.Settings {
 func (a *App) SaveSettings(s settings.Settings) (settings.Settings, error) {
 	s = s.Normalize()
 	a.mu.Lock()
-	s.RecentLinks = a.settings.RecentLinks
+	s = s.KeepIdentity(a.settings)
 	keyChanged := s.APIKey != a.settings.APIKey
 	a.settings = s
 	a.mu.Unlock()
@@ -157,7 +171,11 @@ func (a *App) SaveSettings(s settings.Settings) (settings.Settings, error) {
 		a.mgr.SetClient(gdrive.NewClient(s.APIKey))
 	}
 	a.applyTheme(s.Theme)
-	return s, settings.Save(s)
+	if err := settings.Save(s); err != nil {
+		a.diag.add("saving settings", err)
+		return s, errors.New("Couldn't save your settings. Please try again.")
+	}
+	return s, nil
 }
 
 // SetSpeedLimit changes the speed cap (KB/s, 0 = unlimited) right away.
@@ -170,7 +188,7 @@ func (a *App) SetSpeedLimit(kb int64) error {
 	s := a.settings
 	a.mu.Unlock()
 	a.mgr.SetLimit(kb * 1024)
-	return settings.Save(s)
+	return a.save(s)
 }
 
 // SetParallel changes how many files download at once, right away.
@@ -181,7 +199,16 @@ func (a *App) SetParallel(n int) error {
 	s := a.settings
 	a.mu.Unlock()
 	a.mgr.SetParallel(s.Parallel)
-	return settings.Save(s)
+	return a.save(s)
+}
+
+// save writes settings, keeping the technical error for support.
+func (a *App) save(s settings.Settings) error {
+	if err := settings.Save(s); err != nil {
+		a.diag.add("saving settings", err)
+		return errors.New("Couldn't save your settings. Please try again.")
+	}
+	return nil
 }
 
 // ChooseFolder lets the user pick the download folder.
@@ -204,14 +231,18 @@ func (a *App) ChooseFolder() (string, error) {
 		DefaultDirectory:     start,
 		CanCreateDirectories: true,
 	})
-	if err != nil || dir == "" {
-		return cur, err
+	if err != nil {
+		a.diag.add("folder picker", err)
+		return cur, errors.New("Couldn't open the folder picker. Please try again.")
+	}
+	if dir == "" {
+		return cur, nil
 	}
 	a.mu.Lock()
 	a.settings.DownloadDir = dir
 	s := a.settings
 	a.mu.Unlock()
-	return dir, settings.Save(s)
+	return dir, a.save(s)
 }
 
 func (a *App) applyTheme(theme string) {
@@ -232,12 +263,16 @@ func (a *App) applyTheme(theme string) {
 func (a *App) TestAPIKey(key string) (string, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return "", errors.New("enter an API key first")
+		return "", errors.New("Enter an API key first.")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := gdrive.NewClient(key).TestKey(ctx); err != nil {
-		return "", err
+		a.diag.add("testing API key", err)
+		if gdrive.KindOf(err) == gdrive.ErrBadKey {
+			return "", err
+		}
+		return "", errors.New("Couldn't reach Google. Check your internet connection and try again.")
 	}
 	return "Key works. Large folders will now be listed with exact sizes.", nil
 }
@@ -269,7 +304,7 @@ type ScanResult struct {
 // Scan reads the links and lists everything in them.
 func (a *App) Scan(input string) (*ScanResult, error) {
 	if a.mgr.Busy() {
-		return nil, errors.New("a download is in progress; stop it before opening another link")
+		return nil, errors.New("A download is in progress. Stop it before opening another link.")
 	}
 	links, err := gdrive.ParseLinks(input)
 	if err != nil && len(links) == 0 {
@@ -301,9 +336,10 @@ func (a *App) Scan(input string) (*ScanResult, error) {
 		if errors.Is(err, context.Canceled) {
 			return nil, errors.New("scan cancelled")
 		}
+		a.diag.add("scanning "+input, err)
 		var de *gdrive.Error
-		if !errors.As(err, &de) {
-			return nil, fmt.Errorf("couldn't reach Google Drive. Check your internet connection and try again. (%v)", err)
+		if !errors.As(err, &de) || de.Kind == gdrive.ErrTransient {
+			return nil, errors.New("Couldn't reach Google Drive. Check your internet connection and try again.")
 		}
 		return nil, err
 	}
@@ -343,15 +379,24 @@ func (a *App) CancelScan() {
 func (a *App) Start(selected []int) error {
 	s := a.GetSettings()
 	if err := os.MkdirAll(s.DownloadDir, 0o755); err != nil {
-		return fmt.Errorf("can't use download folder %s: %w", s.DownloadDir, err)
+		a.diag.add("download folder", err)
+		return fmt.Errorf("Can't save files in %s. Choose a different download folder.", s.DownloadDir)
 	}
-	return a.mgr.Start(engine.Options{
+	err := a.mgr.Start(engine.Options{
 		Dir:       s.DownloadDir,
 		Parallel:  s.Parallel,
 		LimitBps:  s.SpeedLimitKB * 1024,
 		Overwrite: s.Overwrite,
 		Retries:   s.Retries,
 	}, selected)
+	if err != nil {
+		a.diag.add("starting download", err)
+		var fe *engine.FolderError
+		if errors.As(err, &fe) {
+			return fmt.Errorf("Can't create folders in %s. Choose a different download folder.", s.DownloadDir)
+		}
+	}
+	return err
 }
 
 // Pause pauses all downloads.
@@ -364,7 +409,13 @@ func (a *App) Resume() { a.mgr.Resume() }
 func (a *App) Stop() { a.mgr.Stop() }
 
 // RetryFailed downloads the failed files again.
-func (a *App) RetryFailed() error { return a.mgr.RetryFailed() }
+func (a *App) RetryFailed() error {
+	err := a.mgr.RetryFailed()
+	if err != nil {
+		a.diag.add("retrying", err)
+	}
+	return err
+}
 
 // ---- Shell helpers ----
 
@@ -428,7 +479,21 @@ func (a *App) ClipboardLink() string {
 	return ""
 }
 
-// AppInfo returns the name and version.
+// AppInfo describes the app for the About screen.
 func (a *App) AppInfo() map[string]string {
-	return map[string]string{"name": appName, "version": version}
+	short := version
+	if strings.HasSuffix(short, ".0") {
+		short = strings.TrimSuffix(short, ".0")
+	}
+	return map[string]string{
+		"name":         appName,
+		"version":      version,
+		"shortVersion": short,
+		"company":      company,
+		"slogan":       slogan,
+		"copyright":    copyright,
+		"language":     "English",
+		"edition":      "Personal use",
+		"os":           feedback.OSVersion(),
+	}
 }

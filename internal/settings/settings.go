@@ -22,6 +22,23 @@ type Settings struct {
 	OpenWhenDone bool     `json:"openWhenDone"`
 	Retries      int      `json:"retries"`
 	RecentLinks  []string `json:"recentLinks"`
+
+	// Registration and installation reporting; changed only through
+	// App.Register and the startup check, never by the settings screen.
+	UserName     string `json:"userName"`
+	UserEmail    string `json:"userEmail"`
+	RegisteredAt string `json:"registeredAt"`
+	InstallID    string `json:"installId"`
+	ReportedID   string `json:"reportedId"` // install ID whose installation notice was queued
+}
+
+// KeepIdentity copies the registration and installation fields from cur, so
+// saving settings from the UI can't change them.
+func (s Settings) KeepIdentity(cur Settings) Settings {
+	s.RecentLinks = cur.RecentLinks
+	s.UserName, s.UserEmail, s.RegisteredAt = cur.UserName, cur.UserEmail, cur.RegisteredAt
+	s.InstallID, s.ReportedID = cur.InstallID, cur.ReportedID
+	return s
 }
 
 // Defaults returns first-run settings.

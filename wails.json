@@ -7,14 +7,13 @@
   "frontend:build": "",
   "wailsjsdir": "./frontend/wailsjs",
   "author": {
-    "name": "Eastape",
-    "email": "vforvickkyy@gmail.com"
+    "name": "Eastape Tech"
   },
   "info": {
-    "companyName": "Eastape",
+    "companyName": "Eastape Tech",
     "productName": "Eastape Downloader",
-    "productVersion": "1.0.1",
-    "copyright": "Copyright © 2026 Eastape",
-    "comments": "Download public Google Drive folders with their folder structure"
+    "productVersion": "1.1.0",
+    "copyright": "© 2026 Eastape Tech. All rights reserved.",
+    "comments": "Made by Creators, for Creators"
   }
 }

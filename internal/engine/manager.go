@@ -110,6 +110,10 @@ type Tick struct {
 type Manager struct {
 	emit func(event string, data any)
 
+	// OnFileError, if set, receives the technical error behind every file
+	// that finally fails (the UI shows a plain-language message).
+	OnFileError func(path string, err error)
+
 	mu        sync.Mutex
 	client    *gdrive.Client
 	res       *gdrive.Result
@@ -418,7 +422,7 @@ func (m *Manager) runFile(ctx context.Context, f *file) {
 		}
 		wait := time.Duration(2+attempt*4) * time.Second
 		m.mu.Lock()
-		f.status, f.err, f.dirty = StRetrying, fmt.Sprintf("Retrying (%d/%d): %v", attempt+1, m.opts.Retries, err), true
+		f.status, f.err, f.dirty = StRetrying, fmt.Sprintf("Retrying (%d of %d): %s", attempt+1, m.opts.Retries, errorText(err)), true
 		m.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -441,7 +445,11 @@ func (m *Manager) runFile(ctx context.Context, f *file) {
 		f.status, f.err = StFailed, errorText(err)
 	}
 	f.speed, f.dirty = 0, true
+	path, failed := f.node.RelPath, err != nil && ctx.Err() == nil
 	m.mu.Unlock()
+	if failed && m.OnFileError != nil {
+		m.OnFileError(path, err)
+	}
 	m.signal()
 }
 
