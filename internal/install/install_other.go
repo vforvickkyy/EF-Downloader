@@ -8,7 +8,9 @@ package install
 type Info struct {
 	ID       string
 	Version  string
+	Dir      string
 	PingSent bool
+	PerUser  bool
 }
 
 // Read returns a zero Info: there is no installer outside Windows.

@@ -70,6 +70,31 @@ func errorText(err error) string {
 	return "Network problem. Check your internet connection."
 }
 
+// ErrorKind names the kind of a file error for usage stats.
+func ErrorKind(err error) string {
+	var le *localError
+	if errors.As(err, &le) {
+		switch {
+		case isDiskFull(le.err):
+			return "disk_full"
+		case errors.Is(le.err, os.ErrPermission):
+			return "no_permission"
+		}
+		return "save_failed"
+	}
+	switch {
+	case errors.Is(err, errStalled):
+		return "stalled"
+	case errors.Is(err, errIncomplete):
+		return "interrupted"
+	}
+	var ge *gdrive.Error
+	if errors.As(err, &ge) {
+		return ge.Kind.String()
+	}
+	return "network"
+}
+
 func joinPath(dir, rel string) string { return filepath.Join(dir, rel) }
 
 // makeFolders recreates the Drive folder tree: every folder holding a

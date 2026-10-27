@@ -21,6 +21,27 @@ const (
 	ErrParse                          // a page Google returned was not understood
 )
 
+// String names the kind for usage stats.
+func (k ErrKind) String() string {
+	switch k {
+	case ErrQuota:
+		return "quota_exceeded"
+	case ErrNotFound:
+		return "not_found"
+	case ErrNoAccess:
+		return "not_shared"
+	case ErrNotDownloadable:
+		return "not_downloadable"
+	case ErrBadKey:
+		return "bad_api_key"
+	case ErrRange:
+		return "resume_refused"
+	case ErrParse:
+		return "drive_page_changed"
+	}
+	return "network"
+}
+
 // Error is a classified Drive error with a message fit for the UI.
 type Error struct {
 	Kind   ErrKind

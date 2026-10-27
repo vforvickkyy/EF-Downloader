@@ -59,6 +59,8 @@
     mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
     send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
   };
   const FILLED = new Set(['play', 'pause', 'stop']);
   const icon = (name, cls = '') => `<svg class="i${FILLED.has(name) ? ' fill' : ''} ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -200,6 +202,7 @@
     $('setRetries').value = String([0, 1, 2, 3, 5].includes(s.retries) ? s.retries : 3);
     $('setSleep').checked = s.preventSleep;
     $('setOpenDone').checked = s.openWhenDone;
+    $('setStats').checked = !s.statsOff;
     renderLimit(s.speedLimitKB);
     $('parValue').textContent = s.parallel;
     $('changeDirBtn').disabled = busy();
@@ -905,7 +908,9 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!$('docModal').hidden) $('docModal').hidden = true;
+      if (!$('noticePanel').hidden) $('noticePanel').hidden = true;
+      else if (!$('docModal').hidden) $('docModal').hidden = true;
+      else if (!$('updateModal').hidden) closeUpdate();
       else if (!$('supportModal').hidden) closeSupport();
       else if (!$('regModal').hidden) { if (!S.regFirst) $('regModal').hidden = true; }
       else if (!$('limitModal').hidden) $('limitModal').hidden = true;
@@ -988,6 +993,7 @@
   $('setRetries').onchange = (e) => saveSettings({ retries: Number(e.target.value) });
   $('setSleep').onchange = (e) => saveSettings({ preventSleep: e.target.checked });
   $('setOpenDone').onchange = (e) => saveSettings({ openWhenDone: e.target.checked });
+  $('setStats').onchange = (e) => saveSettings({ statsOff: !e.target.checked });
   $('keyEye').onclick = () => {
     const k = $('setKey');
     k.type = k.type === 'password' ? 'text' : 'password';
@@ -1218,6 +1224,138 @@
     if (++logoTaps >= 5) { $('credits').hidden = false; logoTaps = 0; }
   });
 
+  // ---------------------------------------------------------------- updates
+  // The app checks at start and every few hours (updates.go). An update is
+  // offered with a pill in the top bar; a required one opens right away.
+  const U = { info: null, toasted: '' };
+
+  function renderUpdate(info) {
+    U.info = info;
+    const avail = ['available', 'downloading', 'installing', 'failed'].includes(info.state);
+    $('updatePill').hidden = !avail;
+    $('updatePillText').textContent = info.state === 'downloading' ? `Updating ${Math.round(info.progress)}%` : `Update to ${info.version}`;
+    $('updateStatus').textContent = avail
+      ? `Version ${info.version} is available`
+      : info.checked ? "You're up to date" : 'Checks for updates automatically';
+
+    // Dialog contents
+    $('updTitle').textContent = info.mandatory ? `Please update to version ${info.version}` : `Version ${info.version} is available`;
+    $('updSub').textContent = `You have version ${info.current}${info.size ? ` · download ${fmtBytes(info.size)}` : ''}`;
+    $('updNotes').textContent = info.notes || 'Improvements and fixes.';
+    $('updNotes').classList.toggle('empty', !info.notes);
+    const working = info.state === 'downloading' || info.state === 'installing';
+    $('updProgress').hidden = !working;
+    $('updBar').style.width = `${info.progress || 0}%`;
+    $('updProgressText').textContent = info.state === 'installing'
+      ? 'Installing… Eastape Downloader will close and open again by itself.'
+      : `Downloading… ${Math.round(info.progress || 0)}%`;
+    $('updError').hidden = info.state !== 'failed';
+    $('updError').textContent = info.error || '';
+    $('updNow').disabled = working;
+    $('updNowText').textContent = !info.canInstall ? 'Download' : info.state === 'failed' ? 'Try again' : 'Update now';
+    $('updLater').hidden = info.mandatory;
+
+    if (info.state === 'available' && info.mandatory && $('updateModal').hidden) openUpdate();
+    if (info.state === 'available' && !info.mandatory && U.toasted !== info.version) {
+      U.toasted = info.version;
+      toast('info', `Version ${info.version} is available`, 'Update in one click. Your downloads and settings stay as they are.', { label: 'See what\'s new', run: openUpdate }, 9000);
+    }
+  }
+
+  function openUpdate() {
+    if (!U.info) return;
+    $('updateModal').hidden = false;
+    renderUpdate(U.info);
+  }
+  function closeUpdate() {
+    if (U.info && U.info.mandatory && U.info.state !== 'failed') return;
+    if (U.info && (U.info.state === 'downloading' || U.info.state === 'installing')) return;
+    $('updateModal').hidden = true;
+  }
+  $('updatePill').onclick = openUpdate;
+  $('updLater').onclick = closeUpdate;
+  $('updNow').onclick = async () => {
+    try {
+      await api.InstallUpdate();
+      if (U.info && !U.info.canInstall) {
+        $('updateModal').hidden = true;
+        toast('info', 'Downloading the new Setup', 'Run it when it finishes to update Eastape Downloader.');
+      }
+    } catch (e) {
+      $('updError').hidden = false;
+      $('updError').textContent = errText(e);
+    }
+  };
+  $('checkUpdatesBtn').onclick = async () => {
+    const b = $('checkUpdatesBtn');
+    b.disabled = true;
+    $('updateStatus').textContent = 'Checking…';
+    try {
+      const info = await api.CheckForUpdates();
+      renderUpdate(info);
+      if (info.state === 'none') toast('ok', "You're up to date", `Version ${info.current} is the latest.`);
+      else openUpdate();
+    } catch (e) {
+      $('updateStatus').textContent = errText(e);
+    } finally {
+      b.disabled = false;
+    }
+  };
+  on('cloud:update', renderUpdate);
+
+  // ---------------------------------------------------------------- news
+  const N = { list: [] };
+  const LEVEL_ICON = { info: 'info', success: 'checkCircle', warning: 'alert', critical: 'alert' };
+  const LEVEL = (l) => (LEVEL_ICON[l] ? l : 'info');
+  const shortDate = (v) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+
+  function renderNotices(list) {
+    N.list = list || [];
+    const open = N.list.filter((n) => !n.dismissed);
+    const unseen = open.filter((n) => !n.seen).length;
+    $('noticeCount').hidden = !unseen;
+    $('noticeCount').textContent = unseen > 9 ? '9+' : String(unseen);
+    $('noticeBtn').title = unseen ? `${unseen} new from Eastape` : 'News from Eastape';
+
+    $('noticeList').innerHTML = open.length
+      ? open.map((n) => `<div class="np-item" data-level="${LEVEL(n.level)}">
+          <b>${esc(n.title)}</b>${n.body ? `<p>${esc(n.body)}</p>` : ''}
+          <div class="np-meta"><span>${esc(shortDate(n.startsAt))}</span>${n.ctaUrl ? `<button class="ghost-btn small" data-open="${n.id}">${esc(n.ctaLabel || 'Open')}</button>` : ''}</div>
+          ${n.dismissible ? `<button class="icon-btn small np-x" data-dismiss="${n.id}" title="Remove">${icon('x')}</button>` : ''}
+        </div>`).join('')
+      : '<div class="np-empty">No news right now.</div>';
+
+    // Banner: the newest unseen message, or any important one still open.
+    const banner = open.find((n) => !n.seen) || open.find((n) => n.level === 'critical' || n.level === 'warning');
+    const el = $('noticeBanner');
+    if (!banner) { el.hidden = true; return; }
+    el.dataset.level = LEVEL(banner.level);
+    el.innerHTML = `<span class="nb-ic">${icon(banner.level === 'success' ? 'megaphone' : LEVEL_ICON[LEVEL(banner.level)])}</span>
+      <div class="nb-text"><b>${esc(banner.title)}</b>${banner.body ? `<span>${esc(banner.body)}</span>` : ''}</div>
+      <div class="nb-actions">${banner.ctaUrl ? `<button class="ghost-btn small" data-open="${banner.id}">${esc(banner.ctaLabel || 'Open')}</button>` : ''}
+      ${banner.dismissible ? `<button class="icon-btn small" data-dismiss="${banner.id}" title="Dismiss">${icon('x')}</button>` : ''}</div>`;
+    el.hidden = false;
+    if (!banner.seen) api.MarkNoticesSeen([banner.id]).catch(() => {});
+  }
+
+  document.addEventListener('click', (e) => {
+    const o = e.target.closest('[data-open]');
+    if (o) { api.OpenNotice(Number(o.dataset.open)).catch(() => {}); return; }
+    const d = e.target.closest('[data-dismiss]');
+    if (d) { api.DismissNotice(Number(d.dataset.dismiss)).catch(() => {}); return; }
+    if (!$('noticePanel').hidden && !e.target.closest('.notice-wrap')) $('noticePanel').hidden = true;
+  });
+  $('noticeBtn').onclick = () => {
+    const p = $('noticePanel');
+    p.hidden = !p.hidden;
+    if (!p.hidden) {
+      const ids = N.list.filter((n) => !n.dismissed && !n.seen).map((n) => n.id);
+      if (ids.length) api.MarkNoticesSeen(ids).catch(() => {});
+    }
+  };
+  $('noticeClose').onclick = () => { $('noticePanel').hidden = true; };
+  on('cloud:notices', renderNotices);
+
   // ---------------------------------------------------------------- start
   async function init() {
     hydrateIcons();
@@ -1231,6 +1369,8 @@
     applyTheme(S.settings.theme);
     renderSettingsBits();
     setPhase('empty');
+    api.GetUpdate().then(renderUpdate).catch(() => {});
+    api.GetNotices().then(renderNotices).catch(() => {});
     if (!S.settings.registeredAt) openRegistration(true);
     else offerClipboard();
   }

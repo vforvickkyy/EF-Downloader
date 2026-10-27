@@ -127,6 +127,7 @@ type Manager struct {
 	runDone   chan struct{}
 	wake      chan struct{}
 	runStart  time.Time
+	inRun     bool // between startRunLocked and the end of dispatch
 	elapsed   time.Duration
 
 	transferred atomic.Int64 // bytes received, for the speed meter
@@ -360,6 +361,7 @@ func (m *Manager) startRunLocked() {
 	m.queue = m.pendingLocked()
 	m.state = StateRunning
 	m.runStart = time.Now()
+	m.inRun = true
 	m.samples = nil
 	go m.dispatch(ctx, m.runDone)
 	go m.ticker(ctx)
@@ -404,6 +406,7 @@ func (m *Manager) dispatch(ctx context.Context, done chan struct{}) {
 		m.state = StateDone
 	}
 	m.elapsed += time.Since(m.runStart)
+	m.inRun = false
 	m.runCancel()
 	m.mu.Unlock()
 
@@ -466,6 +469,57 @@ func (m *Manager) ticker(ctx context.Context) {
 	}
 }
 
+// Transferred returns the bytes received since the manager was created.
+func (m *Manager) Transferred() int64 { return m.transferred.Load() }
+
+// Summary is the job at a glance, for usage stats.
+type Summary struct {
+	State    State
+	Files    Counts
+	Elapsed  float64 // seconds spent downloading
+	Limit    int64
+	Parallel int
+}
+
+// Summary describes the job without changing what the next tick reports.
+func (m *Manager) Summary() Summary {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := Summary{State: m.state, Elapsed: m.elapsed.Seconds(), Limit: m.opts.LimitBps, Parallel: m.opts.Parallel}
+	if m.inRun {
+		s.Elapsed += time.Since(m.runStart).Seconds()
+	}
+	for _, f := range m.files {
+		if f != nil {
+			s.Files.add(f.status)
+		}
+	}
+	return s
+}
+
+func (c *Counts) add(st Status) {
+	switch st {
+	case StExcluded:
+		c.Excluded++
+	case StNA:
+		c.NA++
+	default:
+		c.Total++
+		switch st {
+		case StDone:
+			c.Done++
+		case StSkipped:
+			c.Skipped++
+		case StFailed:
+			c.Failed++
+		case StActive, StRetrying:
+			c.Active++
+		default:
+			c.Queued++
+		}
+	}
+}
+
 // Snapshot returns the full state of every file, for a UI that just loaded.
 func (m *Manager) Snapshot() Tick {
 	m.mu.Lock()
@@ -520,25 +574,8 @@ func (m *Manager) tick() Tick {
 			f.dirty = true
 		}
 		f.lastDone = done
-		switch f.status {
-		case StExcluded:
-			t.Files.Excluded++
-		case StNA:
-			t.Files.NA++
-		default:
-			t.Files.Total++
-			switch f.status {
-			case StDone:
-				t.Files.Done++
-			case StSkipped:
-				t.Files.Skipped++
-			case StFailed:
-				t.Files.Failed++
-			case StActive, StRetrying:
-				t.Files.Active++
-			default:
-				t.Files.Queued++
-			}
+		t.Files.add(f.status)
+		if f.status != StExcluded && f.status != StNA {
 			if size >= 0 {
 				t.TotalBytes += size
 				if size > 0 && f.status != StDone && f.status != StSkipped {

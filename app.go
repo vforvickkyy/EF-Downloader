@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"eastape/internal/cloud"
 	"eastape/internal/engine"
 	"eastape/internal/feedback"
 	"eastape/internal/gdrive"
@@ -28,7 +30,7 @@ const (
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
-var version = "1.1.0"
+var version = "1.2.0"
 
 // App is the bridge between the window (frontend) and the download engine.
 // Its exported methods are callable from JavaScript.
@@ -37,20 +39,30 @@ type App struct {
 	mgr *engine.Manager
 
 	outbox *feedback.Outbox
+	cloud  *cloud.Client
 	diag   *diagLog
+	usage  usage
+
+	quitting atomic.Bool
 
 	mu         sync.Mutex
 	settings   settings.Settings
 	scanCancel context.CancelFunc
 	lastState  engine.State
 	lastTitle  string
+	upd        updateState
 }
 
 // NewApp creates the application.
 func NewApp() *App {
 	a := &App{settings: settings.Load(), outbox: feedback.OpenOutbox(outboxPath()), diag: &diagLog{}}
+	a.usage.features = map[string]bool{}
+	a.cloud = newCloud(a)
 	a.mgr = engine.NewManager(a.onEngineEvent)
-	a.mgr.OnFileError = func(path string, err error) { a.diag.add("download "+path, err) }
+	a.mgr.OnFileError = func(path string, err error) {
+		a.diag.add("download "+path, err)
+		a.jobError(err)
+	}
 	a.mgr.SetClient(gdrive.NewClient(a.settings.APIKey))
 	return a
 }
@@ -58,13 +70,17 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.applyTheme(a.settings.Theme)
-	go a.initIdentity()
+	go func() {
+		a.initIdentity()
+		go a.checkLoop()
+		a.startSession()
+	}()
 	go a.retryOutbox()
 }
 
 // beforeClose asks before quitting in the middle of a download.
 func (a *App) beforeClose(ctx context.Context) bool {
-	if !a.mgr.Busy() {
+	if a.quitting.Load() || !a.mgr.Busy() {
 		a.flushBeforeExit()
 		return false
 	}
@@ -99,6 +115,8 @@ func (a *App) onSecondInstance(options.SecondInstanceData) {
 
 func (a *App) shutdown(context.Context) {
 	power.Release()
+	a.endSession()
+	a.flushBeforeExit()
 }
 
 // onEngineEvent forwards engine events to the window and keeps the title,
@@ -115,7 +133,11 @@ func (a *App) onEngineEvent(name string, data any) {
 		a.lastState = t.State
 		prevent := a.settings.PreventSleep
 		a.mu.Unlock()
+		a.usage.mu.Lock()
+		a.usage.lastSpeed = t.Speed
+		a.usage.mu.Unlock()
 		if t.State != prev {
+			a.onJobState(t)
 			if t.State == engine.StateRunning && prevent {
 				power.Keep()
 			} else if t.State != engine.StateRunning {
@@ -141,7 +163,7 @@ func (a *App) onEngineEvent(name string, data any) {
 		open := a.settings.OpenWhenDone
 		a.mu.Unlock()
 		if open {
-			a.OpenDownloadFolder()
+			a.openDownloadFolder()
 		}
 	}
 	runtime.EventsEmit(a.ctx, name, data)
@@ -162,8 +184,19 @@ func (a *App) SaveSettings(s settings.Settings) (settings.Settings, error) {
 	a.mu.Lock()
 	s = s.KeepIdentity(a.settings)
 	keyChanged := s.APIKey != a.settings.APIKey
+	statsChanged := s.StatsOff != a.settings.StatsOff
 	a.settings = s
 	a.mu.Unlock()
+
+	if statsChanged {
+		if s.StatsOff {
+			a.cloud.DropUsage()
+			a.track("stats_disabled", nil)
+		} else {
+			a.track("stats_enabled", nil)
+		}
+		a.sendSoon()
+	}
 
 	a.mgr.SetLimit(s.SpeedLimitKB * 1024)
 	a.mgr.SetParallel(s.Parallel)
@@ -188,6 +221,9 @@ func (a *App) SetSpeedLimit(kb int64) error {
 	s := a.settings
 	a.mu.Unlock()
 	a.mgr.SetLimit(kb * 1024)
+	if kb > 0 {
+		a.feature("speed_limit")
+	}
 	return a.save(s)
 }
 
@@ -199,6 +235,7 @@ func (a *App) SetParallel(n int) error {
 	s := a.settings
 	a.mu.Unlock()
 	a.mgr.SetParallel(s.Parallel)
+	a.feature("parallel")
 	return a.save(s)
 }
 
@@ -274,6 +311,7 @@ func (a *App) TestAPIKey(key string) (string, error) {
 		}
 		return "", errors.New("Couldn't reach Google. Check your internet connection and try again.")
 	}
+	a.feature("api_key")
 	return "Key works. Large folders will now be listed with exact sizes.", nil
 }
 
@@ -322,6 +360,7 @@ func (a *App) Scan(input string) (*ScanResult, error) {
 	defer cancel()
 
 	client := gdrive.NewClient(s.APIKey)
+	began := time.Now()
 	var lastEmit time.Time
 	var emitMu sync.Mutex
 	res, err := client.Scan(ctx, links, gdrive.DocsFormat(s.DocsFormat), func(p gdrive.ScanProgress) {
@@ -336,6 +375,7 @@ func (a *App) Scan(input string) (*ScanResult, error) {
 		if errors.Is(err, context.Canceled) {
 			return nil, errors.New("scan cancelled")
 		}
+		a.trackScan(links, nil, err, time.Since(began))
 		a.diag.add("scanning "+input, err)
 		var de *gdrive.Error
 		if !errors.As(err, &de) || de.Kind == gdrive.ErrTransient {
@@ -343,6 +383,7 @@ func (a *App) Scan(input string) (*ScanResult, error) {
 		}
 		return nil, err
 	}
+	a.trackScan(links, res, nil, time.Since(began))
 	a.mgr.SetClient(client)
 	if err := a.mgr.Load(res); err != nil {
 		return nil, err
@@ -395,32 +436,51 @@ func (a *App) Start(selected []int) error {
 		if errors.As(err, &fe) {
 			return fmt.Errorf("Can't create folders in %s. Choose a different download folder.", s.DownloadDir)
 		}
+		return err
 	}
-	return err
+	a.startJob()
+	return nil
 }
 
 // Pause pauses all downloads.
-func (a *App) Pause() { a.mgr.Pause() }
+func (a *App) Pause() {
+	a.mgr.Pause()
+	a.feature("pause")
+}
 
 // Resume continues paused downloads.
-func (a *App) Resume() { a.mgr.Resume() }
+func (a *App) Resume() {
+	a.mgr.Resume()
+	a.feature("resume")
+}
 
 // Stop stops all downloads; Start continues them later.
-func (a *App) Stop() { a.mgr.Stop() }
+func (a *App) Stop() {
+	a.mgr.Stop()
+	a.feature("stop")
+}
 
 // RetryFailed downloads the failed files again.
 func (a *App) RetryFailed() error {
 	err := a.mgr.RetryFailed()
 	if err != nil {
 		a.diag.add("retrying", err)
+		return err
 	}
-	return err
+	a.feature("retry_failed")
+	a.startJob()
+	return nil
 }
 
 // ---- Shell helpers ----
 
 // OpenDownloadFolder opens the folder the current job saves into.
 func (a *App) OpenDownloadFolder() {
+	a.feature("open_folder")
+	a.openDownloadFolder()
+}
+
+func (a *App) openDownloadFolder() {
 	dir := a.mgr.Dir()
 	if dir == "" {
 		dir = a.GetSettings().DownloadDir
@@ -449,6 +509,7 @@ func (a *App) RevealFile(i int) {
 	if !ok {
 		return
 	}
+	a.feature("reveal_file")
 	if _, err := os.Stat(p); err != nil {
 		openPath(filepath.Dir(p))
 		return
@@ -495,5 +556,6 @@ func (a *App) AppInfo() map[string]string {
 		"language":     "English",
 		"edition":      "Personal use",
 		"os":           feedback.OSVersion(),
+		"cloud":        fmt.Sprint(cloud.Configured()),
 	}
 }

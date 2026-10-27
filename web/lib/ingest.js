@@ -65,6 +65,13 @@ export async function ingest(request) {
 
   const sql = db();
   const n = Math.max(1, events.length);
+  // Heartbeats keep the live numbers fresh. Only the first one after a quiet
+  // hour, or on a new day, is stored, so daily active counts stay right
+  // without a row every few minutes.
+  const [prev] = await sql`select last_seen from installs where id = ${installId}`;
+  const lastSeen = prev ? new Date(prev.last_seen).getTime() : 0;
+  let keepHeartbeat = !prev || Date.now() - lastSeen > 3600 * 1000
+    || new Date(lastSeen).toISOString().slice(0, 10) !== new Date().toISOString().slice(0, 10);
   const [inst] = await sql`
     insert into installs (id, app_version, os, source, stats_enabled, rl_window, rl_count)
     values (${installId}, ${appVersion}, ${os}, ${source}, ${statsEnabled}, now(), ${n})
@@ -128,6 +135,8 @@ export async function ingest(request) {
       } else if (ev.type === 'heartbeat') {
         lastState = typeof props.state === 'string' ? props.state.slice(0, 20) : null;
         lastBps = num(props.bps, 1e11);
+        if (!keepHeartbeat) continue;
+        keepHeartbeat = false;
       } else if (ev.type === 'scan') {
         if (props.ok) delta.links += Math.max(1, Math.min(50, num(props.links) || 1));
       } else if (ev.type === 'job') {

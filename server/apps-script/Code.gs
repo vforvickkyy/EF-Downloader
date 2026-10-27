@@ -165,9 +165,12 @@ function logRow_(sheetId, ev) {
   }
 }
 
-// Passes the event on to the cloud dashboard (POST /api/v1/ingest).
+// Passes a version 1.1 event on to the cloud dashboard (POST /api/v1/ingest).
+// Version 1.2 and later report to the dashboard themselves.
 function forward_(url, key, ev) {
   if (!url || !key || !/^[a-f0-9]{16,64}$/.test(ev.installId)) return;
+  var v = String(ev.appVersion).split('.').map(Number);
+  if (!(v[0] < 1 || (v[0] === 1 && v[1] < 2))) return;
   var props = { source: ev.source };
   if (ev.prevVersion) props.prevVersion = ev.prevVersion;
   if (ev.type === 'register' || ev.type === 'support') {

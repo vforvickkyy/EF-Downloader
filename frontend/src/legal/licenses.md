@@ -1,6 +1,6 @@
 # Open-source licences
 
-Eastape Downloader · Version 1.1
+Eastape Downloader · Version 1.2
 
 Eastape Downloader is © 2026 Eastape Tech. All rights reserved. It is built with the open-source software below, used under the licence shown for each. We are grateful to their authors.
 

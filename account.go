@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"eastape/internal/cloud"
 	"eastape/internal/feedback"
 	"eastape/internal/install"
 	"eastape/internal/settings"
@@ -35,6 +36,8 @@ func outboxPath() string {
 func (a *App) initIdentity() {
 	inst := install.Read()
 	var ev *feedback.Event
+	var usageType string
+	var usageProps map[string]any
 
 	a.mu.Lock()
 	s := &a.settings
@@ -44,6 +47,7 @@ func (a *App) initIdentity() {
 			e := feedback.NewEvent(feedback.TypeInstall, inst.ID, version)
 			e.Source = "app (installer was offline)"
 			ev = &e
+			usageType, usageProps = "install", map[string]any{"source": "app"}
 			s.ReportedID = inst.ID
 		}
 	} else {
@@ -54,6 +58,7 @@ func (a *App) initIdentity() {
 			e := feedback.NewEvent(feedback.TypeFirstRun, s.InstallID, version)
 			e.Source = "portable"
 			ev = &e
+			usageType, usageProps = "first_run", map[string]any{"source": "portable"}
 			s.ReportedID = s.InstallID
 		}
 	}
@@ -62,6 +67,7 @@ func (a *App) initIdentity() {
 
 	if ev != nil {
 		a.outbox.Add(*ev)
+		a.track(usageType, usageProps)
 	}
 	_ = settings.Save(saved)
 	a.flushOutbox()
@@ -136,6 +142,8 @@ func (a *App) Register(name, email string) (settings.Settings, error) {
 		}
 		a.outbox.Add(ev)
 		a.flushOutbox()
+		a.track("register", map[string]any{"name": name, "email": email, "source": ev.Source})
+		a.sendSoon()
 	}
 	return s, nil
 }
@@ -173,11 +181,27 @@ func (a *App) SendSupport(req SupportRequest) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	if err := feedback.Send(ctx, ev); err != nil {
-		if !errors.Is(err, feedback.ErrNotConfigured) {
-			a.diag.add("support message", err)
-		}
+
+	// The message goes to the dashboard and, while the email relay is set
+	// up, by email too. Either one counts as sent.
+	props := map[string]any{"name": ev.Name, "email": ev.Email, "topic": ev.Topic, "message": ev.Message}
+	if ev.Details != "" {
+		props["details"] = ev.Details
+	}
+	a.track("support", props)
+	sent := false
+	if err := a.cloud.Flush(ctx); err == nil {
+		sent = true
+	} else if !errors.Is(err, cloud.ErrNotConfigured) {
+		a.diag.add("support message", err)
+	}
+	if err := feedback.Send(ctx, ev); err == nil {
+		sent = true
+	} else if !errors.Is(err, feedback.ErrNotConfigured) {
+		a.diag.add("support message by email", err)
 		a.outbox.Add(ev)
+	}
+	if !sent {
 		return "queued", nil
 	}
 	return "sent", nil
@@ -240,7 +264,8 @@ func (d *diagLog) text() string {
 
 // reportInstall runs when the installer starts the app with --report-install:
 // it records the install ID and tells Eastape Tech about the installation,
-// then exits without opening a window.
+// then exits without opening a window. An existing install ID is kept, also
+// when moving from a version 1.1 installation for all users.
 func reportInstall() {
 	prev := install.Read()
 	typ := feedback.TypeInstall
@@ -260,6 +285,25 @@ func reportInstall() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	err := feedback.Send(ctx, ev)
-	_ = install.Write(install.Info{ID: id, Version: version, PingSent: err == nil})
+
+	// Usage stats are on by default; the setting lives with the user's settings.
+	stats := !settings.Load().StatsOff
+	c := cloud.Open("", func() cloud.Identity {
+		return cloud.Identity{InstallID: id, Version: version, OS: ev.OS, Source: "installer", Stats: stats}
+	})
+	props := map[string]any{"source": "installer"}
+	if ev.PrevVersion != "" {
+		props["prevVersion"] = ev.PrevVersion
+	}
+	c.Track(typ, props)
+	cloudErr := c.Flush(ctx)
+	relayErr := feedback.Send(ctx, ev)
+
+	// The dashboard is the record; without it, the email relay.
+	sent := cloudErr == nil || (errors.Is(cloudErr, cloud.ErrNotConfigured) && relayErr == nil)
+	dir := ""
+	if exe, err := os.Executable(); err == nil {
+		dir = filepath.Dir(exe)
+	}
+	_ = install.Write(install.Info{ID: id, Version: version, Dir: dir, PingSent: sent})
 }

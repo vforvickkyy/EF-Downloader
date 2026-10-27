@@ -168,6 +168,12 @@ func TestFullRun(t *testing.T) {
 	if c.Done != 3 || c.Failed != 1 || c.Total != 4 {
 		t.Fatalf("counts %+v", c)
 	}
+	if s := m.Summary(); s.Files != c || s.State != StateDone || s.Elapsed <= 0 || s.Parallel != 3 {
+		t.Fatalf("summary %+v, counts %+v", s, c)
+	}
+	if got := m.Transferred(); got < (300+200)<<10 {
+		t.Fatalf("transferred %d bytes", got)
+	}
 	for path, size := range map[string]int{"Course/a.bin": 300 << 10, "Course/Week 1/b.bin": 200 << 10, "Course/Week 1/flaky.bin": 15} {
 		fi, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path)))
 		if err != nil || fi.Size() != int64(size) {

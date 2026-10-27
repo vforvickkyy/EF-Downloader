@@ -1,6 +1,6 @@
 # Disclaimer
 
-Eastape Downloader · Version 1.1 · Effective 23 October 2026
+Eastape Downloader · Version 1.2 · Effective 23 October 2026
 
 **Eastape Downloader is a helper tool.** It makes it easier to download files that their owners have already shared publicly on Google Drive with "Anyone with the link".
 

@@ -1,5 +1,6 @@
 // Package install records the installation in the registry, so the app
-// knows its install ID and whether the installer already reported it.
+// knows its install ID, where it is installed and whether the installer
+// already reported it.
 package install
 
 import (
@@ -12,37 +13,50 @@ const keyPath = `Software\Eastape Tech\Eastape Downloader`
 type Info struct {
 	ID       string
 	Version  string
+	Dir      string // install folder (1.2 and later)
 	PingSent bool
+	PerUser  bool // installed for the current user (1.2 and later), not for all users (1.1)
 }
 
-// Read returns the recorded installation, or a zero Info for a portable copy.
+// Read returns the recorded installation: the per-user one first, then a
+// version 1.1 installation for all users. A portable copy gets a zero Info.
 func Read() Info {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, registry.QUERY_VALUE|registry.WOW64_64KEY)
+	if info, ok := read(registry.CURRENT_USER, 0); ok {
+		info.PerUser = true
+		return info
+	}
+	if info, ok := read(registry.LOCAL_MACHINE, registry.WOW64_64KEY); ok {
+		return info
+	}
+	return Info{}
+}
+
+func read(root registry.Key, view uint32) (Info, bool) {
+	k, err := registry.OpenKey(root, keyPath, registry.QUERY_VALUE|view)
 	if err != nil {
-		return Info{}
+		return Info{}, false
 	}
 	defer k.Close()
 	var info Info
 	info.ID, _, _ = k.GetStringValue("InstallId")
 	info.Version, _, _ = k.GetStringValue("Version")
+	info.Dir, _, _ = k.GetStringValue("InstallDir")
 	sent, _, _ := k.GetIntegerValue("PingSent")
 	info.PingSent = sent == 1
-	return info
+	return info, info.ID != ""
 }
 
-// Write records the installation. It needs administrator rights, which the
-// installer has.
+// Write records the installation for the current user.
 func Write(info Info) error {
-	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE|registry.WOW64_64KEY)
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, keyPath, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
 	defer k.Close()
-	if err := k.SetStringValue("InstallId", info.ID); err != nil {
-		return err
-	}
-	if err := k.SetStringValue("Version", info.Version); err != nil {
-		return err
+	for name, v := range map[string]string{"InstallId": info.ID, "Version": info.Version, "InstallDir": info.Dir} {
+		if err := k.SetStringValue(name, v); err != nil {
+			return err
+		}
 	}
 	sent := uint32(0)
 	if info.PingSent {

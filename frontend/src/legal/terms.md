@@ -1,6 +1,6 @@
 # Terms and Conditions
 
-Eastape Downloader · Version 1.1 · Effective 23 October 2026
+Eastape Downloader · Version 1.2 · Effective 27 October 2026
 
 These Terms and Conditions ("Terms") are an agreement between you and Eastape Tech ("Eastape Tech", "we", "us") for the use of Eastape Downloader ("the Software"). By installing, registering or using the Software you agree to these Terms, our Privacy Policy and our Disclaimer. If you do not agree, do not install or use the Software.
 
@@ -43,7 +43,9 @@ Our Privacy Policy explains what information the Software collects and how it is
 
 ## 7. Updates and support
 
-We may release updates, change features or stop providing the Software at any time. Support is provided on a best-effort basis through Contact Support in the app.
+We may release updates, change features or stop providing the Software at any time. The Software checks for updates automatically and offers them in the app; an update is installed only when you choose "Update now", except that we may mark an update as required (for example to fix a security problem), in which case the Software asks you to install it before continuing. Updates are signed by Eastape Tech, and the Software checks the signature before installing one. The Software may also show announcements from Eastape Tech about the Software.
+
+Support is provided on a best-effort basis through Contact Support in the app.
 
 ## 8. Intellectual property
 

@@ -4,11 +4,17 @@
 ;   makensis -DVERSION=1.0.2 -DAPP_EXE_SRC=..\..\bin\EastapeDownloader.exe \
 ;            -DWEBVIEW2_BOOTSTRAPPER=path\to\MicrosoftEdgeWebview2Setup.exe eastape.nsi
 ; Optional: -DSIGN_CMD=path\to\sign.cmd signs the installer and uninstaller.
+;
+; Installs for the current user, without administrator rights, so the app can
+; update itself: it runs a new Setup with /S /UPDATE, which waits for the app
+; to close, installs silently and opens the app again.
+; Version 1.1 was installed for all users; Setup moves such an installation
+; to the current user (keeping its install ID and settings).
 
 Unicode true
 ManifestDPIAware true
 SetCompressor /SOLID lzma
-RequestExecutionLevel admin
+RequestExecutionLevel user
 
 !ifndef VERSION
   !define VERSION "1.0.0"
@@ -28,7 +34,6 @@ RequestExecutionLevel admin
 !define COMPANY       "Eastape Tech"
 !define SLOGAN        "Made by Creators, for Creators"
 !define UNINST_KEY    "Software\Microsoft\Windows\CurrentVersion\Uninstall\EastapeDownloader"
-!define FIREWALL_RULE "Eastape Downloader"
 !define APP_REG_KEY   "Software\Eastape Tech\Eastape Downloader"
 ; Mutex Wails holds while the app runs (its single-instance lock, from the
 ; SingleInstanceLock UniqueId in main.go).
@@ -39,7 +44,7 @@ Caption "${APP_NAME} ${VERSION} Setup"
 UninstallCaption "${APP_NAME} Uninstall"
 BrandingText "${APP_NAME} ${VERSION} · ${COMPANY}"
 OutFile "${OUT_DIR}\EastapeDownloader-Setup-${VERSION}.exe"
-InstallDir "$PROGRAMFILES64\${APP_NAME}"
+InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 ShowInstDetails hide
 ShowUninstDetails hide
 
@@ -63,6 +68,9 @@ VIAddVersionKey "Comments"        "${SLOGAN}"
 !include "x64.nsh"
 !include "WinVer.nsh"
 !include "FileFunc.nsh"
+
+Var IsUpdate   ; 1 when started by the app's updater (/UPDATE)
+Var OldDir     ; folder of a version 1.1 installation for all users
 
 ; ---------------------------------------------------------------- look
 !define MUI_ICON   "..\icon.ico"
@@ -108,13 +116,23 @@ VIAddVersionKey "Comments"        "${SLOGAN}"
 ; ---------------------------------------------------------------- helpers
 !macro DEFINE_CLOSE_APP UN
 Function ${UN}CloseApp
-  retry:
+  ; The updater closes the app right after starting Setup: give it up to
+  ; 30 seconds.
+  StrCpy $1 0
+  wait:
     System::Call 'kernel32::OpenMutexW(i 0x00100000, i 0, w "${RUNNING_MUTEX}") i .r0'
-    ${If} $0 <> 0
-      System::Call 'kernel32::CloseHandle(i r0)'
-      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} is running.$\r$\n$\r$\nPlease close it (if it is downloading, stop the download first), then click Retry." /SD IDCANCEL IDRETRY retry
-      Abort
+    ${If} $0 = 0
+      Return
     ${EndIf}
+    System::Call 'kernel32::CloseHandle(i r0)'
+    ${If} $IsUpdate == 1
+    ${AndIf} $1 < 60
+      IntOp $1 $1 + 1
+      Sleep 500
+      Goto wait
+    ${EndIf}
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} is running.$\r$\n$\r$\nPlease close it (if it is downloading, stop the download first), then click Retry." /SD IDCANCEL IDRETRY wait
+    Abort
 FunctionEnd
 !macroend
 !insertmacro DEFINE_CLOSE_APP ""
@@ -129,24 +147,71 @@ Function .onInit
     MessageBox MB_OK|MB_ICONSTOP "${APP_NAME} needs 64-bit Windows." /SD IDOK
     Abort
   ${EndIf}
-  ; Upgrading: offer the folder of the existing installation.
-  SetRegView 64
-  ReadRegStr $0 HKLM "${UNINST_KEY}" "InstallLocation"
+  StrCpy $IsUpdate 0
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/UPDATE" $1
+  ${IfNot} ${Errors}
+    StrCpy $IsUpdate 1
+  ${EndIf}
+
+  ; Upgrading: keep the folder of the existing installation.
+  ReadRegStr $0 HKCU "${UNINST_KEY}" "InstallLocation"
   ${If} $0 != ""
     StrCpy $INSTDIR $0
   ${EndIf}
+
+  ; A version 1.1 installation for all users is moved to this user.
+  SetRegView 64
+  ReadRegStr $OldDir HKLM "${UNINST_KEY}" "InstallLocation"
+  SetRegView default
 FunctionEnd
 
-; Setup runs as administrator; start the app through Explorer so it runs as
-; the signed-in user, like a normal launch.
 Function LaunchApp
-  Exec '"$WINDIR\explorer.exe" "$INSTDIR\${APP_EXE}"'
+  Exec '"$INSTDIR\${APP_EXE}"'
+FunctionEnd
+
+; After an in-app update, open the app again.
+Function .onInstSuccess
+  ${If} $IsUpdate == 1
+    Call LaunchApp
+  ${EndIf}
+FunctionEnd
+
+; Removes the version 1.1 installation (for all users). Its uninstaller needs
+; administrator rights, so Windows asks once. Settings and the install ID are
+; kept. Skipped during silent updates.
+Function RemoveOldInstall
+  ${If} $OldDir == ""
+  ${OrIf} $IsUpdate == 1
+  ${OrIfNot} ${FileExists} "$OldDir\Uninstall.exe"
+    Return
+  ${EndIf}
+  DetailPrint "Removing the previous version (installed for all users)..."
+  MessageBox MB_OK|MB_ICONINFORMATION "Setup will now remove the previous version of ${APP_NAME}, which was installed for all users of this PC.$\r$\n$\r$\nWindows will ask for permission. Your settings and downloads are kept." /SD IDOK
+  ExecShellWait "runas" "$OldDir\Uninstall.exe" "/S"
+  ; The uninstaller continues from a temporary copy: wait until it's done.
+  SetRegView 64
+  StrCpy $1 0
+  ${Do}
+    ReadRegStr $0 HKLM "${UNINST_KEY}" "DisplayName"
+    ${If} $0 == ""
+    ${OrIf} $1 >= 120
+      ${Break}
+    ${EndIf}
+    IntOp $1 $1 + 1
+    Sleep 500
+  ${Loop}
+  SetRegView default
+  ${If} $0 != ""
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The previous version couldn't be removed. You can remove it later in Windows Settings > Apps > Installed apps: it is the ${APP_NAME} entry with version 1.1." /SD IDOK
+  ${EndIf}
 FunctionEnd
 
 ; ---------------------------------------------------------------- install
 Section "${APP_NAME} (required)" SecApp
   SectionIn RO
-  SetShellVarContext all
+  SetShellVarContext current
   Call CloseApp
 
   ; The window is drawn by Microsoft Edge WebView2. Windows 11 and updated
@@ -176,48 +241,49 @@ Section "${APP_NAME} (required)" SecApp
 
   CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0 SW_SHOWNORMAL "" "Download public Google Drive folders"
 
-  ; Firewall: allow the app explicitly so strict firewall setups never
-  ; block or prompt for it. It only makes outgoing connections to Google.
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="${FIREWALL_RULE}"'
-  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="${FIREWALL_RULE}" dir=out action=allow program="$INSTDIR\${APP_EXE}" enable=yes profile=any description="Lets ${APP_NAME} download from Google Drive"'
-  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="${FIREWALL_RULE}" dir=in action=allow program="$INSTDIR\${APP_EXE}" enable=yes profile=private,domain description="Prevents Windows Firewall prompts for ${APP_NAME}"'
-
   ; Record the installation and let Eastape Tech know about it (see the
   ; Privacy Policy). Takes at most ~15 seconds; offline is fine, the app
-  ; reports it later.
+  ; reports it later. This also carries over the install ID of a version
+  ; 1.1 installation, so it must run before that one is removed.
   DetailPrint "Finishing setup..."
   ExecWait '"$INSTDIR\${APP_EXE}" --report-install'
 
-  ; "Apps & features" entry.
-  SetRegView 64
-  WriteRegStr   HKLM "${UNINST_KEY}" "DisplayName"          "${APP_NAME}"
-  WriteRegStr   HKLM "${UNINST_KEY}" "DisplayVersion"       "${VERSION}"
-  WriteRegStr   HKLM "${UNINST_KEY}" "Publisher"            "${COMPANY}"
-  WriteRegStr   HKLM "${UNINST_KEY}" "Comments"             "${SLOGAN}"
-  WriteRegStr   HKLM "${UNINST_KEY}" "DisplayIcon"          "$INSTDIR\${APP_EXE},0"
-  WriteRegStr   HKLM "${UNINST_KEY}" "InstallLocation"      "$INSTDIR"
-  WriteRegStr   HKLM "${UNINST_KEY}" "UninstallString"      '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr   HKLM "${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
-  WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
-  WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
+  ; "Installed apps" entry.
+  WriteRegStr   HKCU "${UNINST_KEY}" "DisplayName"          "${APP_NAME}"
+  WriteRegStr   HKCU "${UNINST_KEY}" "DisplayVersion"       "${VERSION}"
+  WriteRegStr   HKCU "${UNINST_KEY}" "Publisher"            "${COMPANY}"
+  WriteRegStr   HKCU "${UNINST_KEY}" "Comments"             "${SLOGAN}"
+  WriteRegStr   HKCU "${UNINST_KEY}" "DisplayIcon"          "$INSTDIR\${APP_EXE},0"
+  WriteRegStr   HKCU "${UNINST_KEY}" "InstallLocation"      "$INSTDIR"
+  WriteRegStr   HKCU "${UNINST_KEY}" "UninstallString"      '"$INSTDIR\Uninstall.exe"'
+  WriteRegStr   HKCU "${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+  WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
-  WriteRegDWORD HKLM "${UNINST_KEY}" "EstimatedSize" "$0"
+  WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
+
+  Call RemoveOldInstall
 SectionEnd
 
 Section "Desktop shortcut" SecDesktop
-  SetShellVarContext all
+  SetShellVarContext current
+  ; A silent update keeps the user's choice: no shortcut if they removed it.
+  ${If} $IsUpdate == 1
+  ${AndIfNot} ${FileExists} "$DESKTOP\${APP_NAME}.lnk"
+    Return
+  ${EndIf}
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0 SW_SHOWNORMAL "" "Download public Google Drive folders"
 SectionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-  !insertmacro MUI_DESCRIPTION_TEXT ${SecApp}     "The app, a Start menu shortcut, an uninstaller and a Windows Firewall allow rule."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecApp}     "The app, a Start menu shortcut and an uninstaller. Installed for your Windows account only; no administrator rights needed."
   !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} "Put a shortcut to ${APP_NAME} on the desktop."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ; ---------------------------------------------------------------- uninstall
 Section "Uninstall"
-  SetShellVarContext all
+  SetShellVarContext current
   Call un.CloseApp
 
   Delete "$INSTDIR\${APP_EXE}"
@@ -229,16 +295,19 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   Delete "$DESKTOP\${APP_NAME}.lnk"
 
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="${FIREWALL_RULE}"'
+  DeleteRegKey HKCU "${UNINST_KEY}"
+  DeleteRegKey HKCU "${APP_REG_KEY}"
+  DeleteRegKey /ifempty HKCU "Software\Eastape Tech"
 
-  SetRegView 64
-  DeleteRegKey HKLM "${UNINST_KEY}"
-  DeleteRegKey HKLM "${APP_REG_KEY}"
-  DeleteRegKey /ifempty HKLM "Software\Eastape Tech"
+  ; Downloaded updates
+  RMDir /r "$LOCALAPPDATA\EastapeDownloader\updates"
+  RMDir "$LOCALAPPDATA\EastapeDownloader"
 
   MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete your ${APP_NAME} settings?$\r$\n$\r$\nYour downloaded files are never touched." /SD IDNO IDNO keepSettings
-    SetShellVarContext current
     RMDir /r "$APPDATA\EastapeDownloader"
-    SetShellVarContext all
   keepSettings:
 SectionEnd
+
+Function un.onInit
+  StrCpy $IsUpdate 0
+FunctionEnd

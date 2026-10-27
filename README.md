@@ -2,7 +2,7 @@
 
 <h1 align="center">Eastape Downloader</h1>
 
-<p align="center"><b>Made by Creators, for Creators</b><br>Download whole public Google Drive folders on Windows, with the same folder structure, a speed limit, and pause / resume.<br>Version 1.1 · Developed by Eastape Tech · © 2026 Eastape Tech. All rights reserved.</p>
+<p align="center"><b>Made by Creators, for Creators</b><br>Download whole public Google Drive folders on Windows, with the same folder structure, a speed limit, and pause / resume.<br>Version 1.2 · Developed by Eastape Tech · © 2026 Eastape Tech. All rights reserved.</p>
 
 ---
 
@@ -17,26 +17,32 @@
 - **Smart re-runs.** Files already downloaded are skipped.
 - **Automatic retries** and a *Retry failed* button.
 - **Google Docs, Sheets, Slides, Drawings** are saved as Office files or PDF.
+- **Updates in one click.** The app checks for new versions and installs them itself; signed, so only Eastape Tech's updates are accepted.
+- **News from Eastape** (announcements) right in the app.
 - **Help & support** form inside the app; Terms, Privacy Policy, Disclaimer and open-source licences in Settings → Legal.
 
 ## Installing
 
-Share **`EastapeDownloader-Setup-<version>.exe`**. The installer has a welcome page, Terms and Conditions (must be accepted), a choice of desktop shortcut, a folder picker, and an uninstaller in *Apps & features*. It also:
+Share **`EastapeDownloader-Setup-<version>.exe`**. The installer has a welcome page, Terms and Conditions (must be accepted), a choice of desktop shortcut, a folder picker, and an uninstaller in *Installed apps*. It installs for the current Windows user (in `%LOCALAPPDATA%\Programs`), so it needs no administrator rights and the app can update itself silently. It also:
 
 - installs Microsoft Edge WebView2 if the PC doesn't have it;
-- adds a Windows Firewall allow rule for the app;
+- moves a version 1.1 installation (installed for all users) to the current user, keeping its settings and install ID; Windows asks once for permission to remove the old copy;
 - refuses to overwrite the app while it is running and asks the user to close it.
+
+`Setup.exe /S` installs silently; `/S /UPDATE` is what the in-app updater uses (waits for the app to close, then reopens it).
 
 `EastapeDownloader.exe` alone also runs without installing (portable).
 
 Because the files aren't code-signed yet, Windows SmartScreen shows "Windows protected your PC" when someone opens a downloaded installer: **More info → Run anyway**. Only a code-signing certificate removes that warning; the build already supports signing (`SIGN_CMD`, see below).
 
-## Registration, install notices and support
+## Dashboard, stats, updates and support
 
+- The **Eastape Downloader cloud** ([`web/`](web), on Vercel + Neon) receives installs, registrations, support messages and anonymous usage stats, offers updates and announcements, and has the **admin dashboard** (live users, downloads, data, versions, problems, support inbox, update publishing, announcements, team). See **[web/README.md](web/README.md)**.
 - On first start the app asks for the user's **name and email** (required) and acceptance of the Terms, Privacy Policy and Disclaimer.
-- Every installation, update and reinstall is reported once, even if the user never registers. Registrations and support messages are sent too.
-- Everything goes through a private relay that you deploy in your own Google account, so the app contains no email address or password: **[server/apps-script/README.md](server/apps-script/README.md)**. Installs and registrations go to `tech@`, support messages to `info@`; the addresses only exist in the relay script.
-- Without a network the app keeps messages in an outbox and sends them later.
+- Every installation, update and reinstall is reported once, even if the user never registers.
+- Usage stats never include links or file names, and users can turn them off in Settings → Privacy.
+- Install notices, registrations and support messages can also be emailed through a private relay in your Google account ([server/apps-script/README.md](server/apps-script/README.md)); the receiving addresses live only in the relay's settings.
+- Without a network the app keeps everything in an outbox and sends it later.
 - Everything that is collected is listed in the Privacy Policy (`frontend/src/legal/privacy.md`). Change the policy if you change what is sent.
 
 ## Building
@@ -44,16 +50,19 @@ Because the files aren't code-signed yet, Windows SmartScreen shows "Windows pro
 You need Go 1.23+, the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2`) and NSIS (`makensis`). There's no npm step; the UI is plain HTML, CSS and JS in `frontend/src`.
 
 ```sh
-# relay settings (once): create relay.env at the project root
-#   EASTAPE_RELAY_URL=https://script.google.com/macros/s/.../exec
-#   EASTAPE_RELAY_TOKEN=<same value as the RELAY_TOKEN script property>
+# settings (once), files at the project root that git ignores:
+#   cloud.env:  EASTAPE_APP_KEY=<APP_KEY of the cloud service>
+#   relay.env:  EASTAPE_RELAY_URL=https://script.google.com/macros/s/.../exec   (optional email relay)
+#               EASTAPE_RELAY_TOKEN=<same value as the RELAY_TOKEN script property>
 
-./scripts/build-windows.sh            # → build/bin/EastapeDownloader.exe + EastapeDownloader-Setup-1.1.0.exe
+./scripts/build-windows.sh            # → build/bin/EastapeDownloader.exe + EastapeDownloader-Setup-1.2.0.exe
 go test -race ./internal/...          # tests
 python3 scripts/gen-licenses.py       # refresh the open-source licences page after changing dependencies
 ```
 
-GitHub Actions builds both files on every push (download them from the run's *Artifacts*). Add the repository secrets `EASTAPE_RELAY_URL` and `EASTAPE_RELAY_TOKEN` so those builds can send messages. Pushing a tag like `v1.1.0` attaches the files to a GitHub Release.
+GitHub Actions builds both files on every push (download them from the run's *Artifacts*). Add the repository secret `EASTAPE_APP_KEY` (and optionally `EASTAPE_RELAY_URL` / `EASTAPE_RELAY_TOKEN`) so those builds can talk to the service. Pushing a tag like `v1.2.0` attaches the files to a GitHub Release.
+
+To ship an update to existing users, upload the new Setup in the dashboard (**Updates → New update**) and publish it.
 
 **Code signing:** set `SIGN_CMD` to a script that signs the file passed as its argument (for example with `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p ... %1`). The installer and uninstaller are then signed automatically.
 
@@ -63,11 +72,14 @@ GitHub Actions builds both files on every push (download them from the run's *Ar
 |---|---|
 | `main.go`, `app.go` | Window setup and the methods the UI calls |
 | `account.go` | Registration, install notices, support messages, diagnostics |
+| `usage.go`, `updates.go` | Usage stats; update checks, the in-app updater and announcements |
 | `internal/gdrive` | Link parsing, folder listing, download streams, exports |
 | `internal/engine` | Download queue, parallel workers, speed limiter, pause / resume / stop |
-| `internal/feedback` | Sending to the relay, offline outbox |
-| `internal/install` | Install ID in the registry |
+| `internal/cloud` | Talking to the cloud service: event outbox, update check, signed update download |
+| `internal/feedback` | Sending to the email relay, offline outbox |
+| `internal/install` | Install ID and folder in the registry |
 | `internal/settings`, `internal/power` | Preferences; keeping Windows awake |
 | `frontend/src` | The UI; `frontend/src/legal` holds the legal documents |
 | `build/windows/installer` | NSIS installer script and artwork |
 | `server/apps-script` | The email relay to deploy in Google Apps Script |
+| `web` | The cloud service and admin dashboard (Vercel + Neon) |

@@ -30,6 +30,16 @@ type Settings struct {
 	RegisteredAt string `json:"registeredAt"`
 	InstallID    string `json:"installId"`
 	ReportedID   string `json:"reportedId"` // install ID whose installation notice was queued
+
+	// StatsOff stops anonymous usage stats (Settings > Privacy).
+	StatsOff bool `json:"statsOff"`
+
+	// Announcements the user has seen or closed, and update bookkeeping;
+	// changed only by the app.
+	SeenNotices      []int64 `json:"seenNotices,omitempty"`
+	DismissedNotices []int64 `json:"dismissedNotices,omitempty"`
+	LastVersion      string  `json:"lastVersion,omitempty"`   // version that last ran
+	PendingUpdate    string  `json:"pendingUpdate,omitempty"` // version being installed by the in-app updater
 }
 
 // KeepIdentity copies the registration and installation fields from cur, so
@@ -38,7 +48,24 @@ func (s Settings) KeepIdentity(cur Settings) Settings {
 	s.RecentLinks = cur.RecentLinks
 	s.UserName, s.UserEmail, s.RegisteredAt = cur.UserName, cur.UserEmail, cur.RegisteredAt
 	s.InstallID, s.ReportedID = cur.InstallID, cur.ReportedID
+	s.SeenNotices, s.DismissedNotices = cur.SeenNotices, cur.DismissedNotices
+	s.LastVersion, s.PendingUpdate = cur.LastVersion, cur.PendingUpdate
 	return s
+}
+
+// AddNotice records an announcement ID in list (seen or dismissed),
+// keeping the newest 200.
+func AddNotice(list []int64, id int64) []int64 {
+	for _, x := range list {
+		if x == id {
+			return list
+		}
+	}
+	list = append(list, id)
+	if len(list) > 200 {
+		list = list[len(list)-200:]
+	}
+	return list
 }
 
 // Defaults returns first-run settings.

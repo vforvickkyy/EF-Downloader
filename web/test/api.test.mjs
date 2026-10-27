@@ -135,6 +135,24 @@ test('ingest records installs, users, support and usage', { skip }, async () => 
   assert.equal(JSON.stringify(reg.props).includes('@'), false);
 });
 
+test('only the first heartbeat after a quiet spell is stored', { skip }, async () => {
+  const id = 'e'.repeat(32);
+  const beat = (state) => app('POST', '/api/v1/ingest', { installId: id, events: [{ type: 'heartbeat', props: { state, bps: 10 } }] });
+  await beat('idle');
+  await beat('downloading');
+  await beat('downloading');
+  const sql = db();
+  const rows = await sql`select * from events where install_id = ${id}`;
+  assert.equal(rows.length, 1);
+  const [inst] = await sql`select last_state from installs where id = ${id}`;
+  assert.equal(inst.last_state, 'downloading');
+  await sql`update installs set last_seen = now() - interval '2 hours' where id = ${id}`;
+  await beat('idle');
+  assert.equal((await sql`select count(*)::int as n from events where install_id = ${id}`)[0].n, 2);
+  await sql`delete from events where install_id = ${id}`;
+  await sql`delete from installs where id = ${id}`;
+});
+
 test('ingest rate limit', { skip }, async () => {
   const id = 'c'.repeat(32);
   const events = Array.from({ length: 200 }, () => ({ type: 'feature', props: { name: 'x' } }));
