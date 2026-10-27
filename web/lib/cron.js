@@ -7,11 +7,22 @@ const RAW_EVENT_DAYS = 180;
 /**
  * GET /api/cron/daily — run by Vercel Cron once a day: saves yesterday's
  * totals (kept forever) and removes old raw events and expired sessions.
+ * With CRON_SECRET set, only Vercel Cron can call it; without, anyone can,
+ * but it runs at most once every 30 minutes (the work is safe to repeat).
  */
 export async function daily(request) {
   const secret = process.env.CRON_SECRET;
-  if (!secret || !safeEqual(request.headers.get('authorization'), `Bearer ${secret}`)) throw new HttpError(401, 'Unauthorized');
   const sql = db();
+  if (secret) {
+    if (!safeEqual(request.headers.get('authorization'), `Bearer ${secret}`)) throw new HttpError(401, 'Unauthorized');
+  } else {
+    const [ran] = await sql`
+      insert into server_keys (name, value) values ('cron_last_run', now()::text)
+      on conflict (name) do update set value = excluded.value
+        where server_keys.value::timestamptz < now() - interval '30 minutes'
+      returning name`;
+    if (!ran) throw new HttpError(429, 'Ran recently');
+  }
   await sql`
     insert into daily_stats (day, metric, value)
     select d.day, m.metric, m.value

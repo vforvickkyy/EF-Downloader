@@ -25,6 +25,7 @@ const { handle } = await import('../lib/router.js');
 const { db, closeDb } = await import('../lib/db.js');
 const { hashPassword } = await import('../lib/crypto.js');
 const { pickUpdate, rolloutBucket } = await import('../lib/check.js');
+const { forgetSigningKey } = await import('../lib/signing.js');
 
 const BASE = 'https://admin.test';
 const ID = 'a'.repeat(32);
@@ -60,7 +61,10 @@ before(async () => {
   if (skip) return;
   const sql = db();
   await sql.unsafe('drop schema public cascade; create schema public;');
-  await sql.unsafe(fs.readFileSync(path.join(here, '..', 'migrations', '001_init.sql'), 'utf8'));
+  const dir = path.join(here, '..', 'migrations');
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.sql')).sort()) {
+    await sql.unsafe(fs.readFileSync(path.join(dir, f), 'utf8'));
+  }
   await sql`insert into admin_users (email, name, role, password_hash) values ('owner@example.com', 'Owner', 'owner', ${hashPassword('owner-password-1')})`;
   await sql`insert into admin_users (email, name, role, password_hash) values ('viewer@example.com', 'Viewer', 'viewer', ${hashPassword('viewer-password-1')})`;
   owner = admin(await login('owner@example.com', 'owner-password-1'));
@@ -72,7 +76,7 @@ after(async () => { await closeDb(); });
 test('health reports the schema version', { skip }, async () => {
   const r = await call('GET', '/api/v1/health');
   assert.equal(r.status, 200);
-  assert.equal(r.data.schema, 1);
+  assert.equal(r.data.schema, 2);
 });
 
 test('unknown routes and methods', { skip }, async () => {
@@ -291,6 +295,25 @@ test('releases are fingerprinted, signed and offered after publishing', { skip }
   }
 });
 
+test('without RELEASE_SIGNING_KEY the service makes and keeps its own key', { skip }, async () => {
+  const saved = process.env.RELEASE_SIGNING_KEY;
+  delete process.env.RELEASE_SIGNING_KEY;
+  forgetSigningKey();
+  try {
+    const a = (await call('GET', '/api/v1/update-key')).data.publicKey;
+    forgetSigningKey(); // as a fresh function instance would
+    const b = (await call('GET', '/api/v1/update-key')).data.publicKey;
+    assert.equal(Buffer.from(a, 'base64').length, 32);
+    assert.equal(a, b);
+    const rows = await db()`select name from server_keys`;
+    assert.deepEqual(rows.map((r) => r.name), ['release_signing_key']);
+    assert.equal((await owner.get('/api/admin/releases')).data.publicKey, a);
+  } finally {
+    process.env.RELEASE_SIGNING_KEY = saved;
+    forgetSigningKey();
+  }
+});
+
 test('team: owner adds and removes people; others cannot', { skip }, async () => {
   const r = await owner.send('POST', '/api/admin/team', { email: 'New@Example.com', name: 'New', role: 'admin' });
   assert.equal(r.status, 200);
@@ -323,4 +346,14 @@ test('daily cron needs its secret and saves totals', { skip }, async () => {
   assert.equal(r.data.removedEvents, 1);
   const [bytes] = await sql`select value from daily_stats where metric = 'bytes'`;
   assert.equal(Number(bytes.value), 5_000_000);
+
+  // Without CRON_SECRET it runs, but not twice in a row.
+  const saved = process.env.CRON_SECRET;
+  delete process.env.CRON_SECRET;
+  try {
+    assert.equal((await call('GET', '/api/cron/daily')).status, 200);
+    assert.equal((await call('GET', '/api/cron/daily')).status, 429);
+  } finally {
+    process.env.CRON_SECRET = saved;
+  }
 });

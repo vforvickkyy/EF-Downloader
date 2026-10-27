@@ -4,7 +4,7 @@ import { del } from '@vercel/blob';
 import { db } from '../db.js';
 import { HttpError, json, readJson, str, int, bool } from '../http.js';
 import { requireAdmin } from '../auth.js';
-import { signUpdate, signingPublicKey } from '../crypto.js';
+import { signUpdate, signingPublicKey } from '../signing.js';
 import { VERSION_RE } from '../semver.js';
 
 const N = (v) => Number(v || 0);
@@ -25,7 +25,7 @@ export async function listReleases(request) {
   const adoption = await sql`
     select app_version, count(*) as n from installs where last_seen > now() - interval '30 days' group by 1`;
   const byVersion = Object.fromEntries(adoption.map((a) => [a.app_version, N(a.n)]));
-  return json({ ok: true, rows: rows.map((r) => out(r, byVersion)), publicKey: signingPublicKey(), blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN) });
+  return json({ ok: true, rows: rows.map((r) => out(r, byVersion)), publicKey: await signingPublicKey(), blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN) });
 }
 
 /**
@@ -94,7 +94,7 @@ export async function createRelease(request) {
   if (dup) throw new HttpError(409, `Version ${version} already exists.`);
 
   const { size, sha256 } = await fingerprint(url);
-  const signature = signUpdate({ version, sha256, size, url });
+  const signature = await signUpdate({ version, sha256, size, url });
   const [row] = await sql`
     insert into releases (version, channel, file_url, file_name, size, sha256, signature, notes, mandatory, min_supported, rollout)
     values (${version}, ${channel}, ${url}, ${str(body.fileName, 200) || decodeURIComponent(url.split('/').pop())}, ${size}, ${sha256}, ${signature},

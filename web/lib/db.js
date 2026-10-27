@@ -5,8 +5,14 @@ let client;
 /** Shared Postgres client (Neon's pooled connection in production). */
 export function db() {
   if (!client) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is not set');
+    const raw = process.env.DATABASE_URL;
+    if (!raw) throw new Error('DATABASE_URL is not set');
+    // Neon's connection strings carry libpq-only options; postgres.js would
+    // send them to the server as settings. TLS is set below instead.
+    const parsed = new URL(raw);
+    parsed.searchParams.delete('channel_binding');
+    parsed.searchParams.delete('sslmode');
+    const url = parsed.toString();
     const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || url.includes('host=/');
     client = postgres(url, {
       max: 3,

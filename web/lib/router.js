@@ -11,9 +11,11 @@ import {
 import { listReleases, uploadToken, createRelease, updateRelease, deleteRelease } from './admin/releases.js';
 import { daily } from './cron.js';
 import { db } from './db.js';
+import { signingPublicKey } from './signing.js';
 
 const routes = [
   ['GET', '/api/v1/health', health],
+  ['GET', '/api/v1/update-key', updateKey],
   ['POST', '/api/v1/ingest', ingest],
   ['GET', '/api/v1/check', check],
 
@@ -50,6 +52,11 @@ const routes = [
 async function health() {
   const [row] = await db()`select max(version) as v from schema_migrations`;
   return json({ ok: true, service: 'eastape-downloader', schema: Number(row.v || 0), time: new Date().toISOString() });
+}
+
+/** The public key the app checks update signatures with (not a secret). */
+async function updateKey() {
+  return json({ ok: true, publicKey: await signingPublicKey() });
 }
 
 /** Routes a request to its handler and turns errors into JSON. */

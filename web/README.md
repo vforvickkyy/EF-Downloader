@@ -21,6 +21,7 @@ web/
 | `POST /api/v1/ingest` | the app sends batches of usage events (`x-app-key` header) |
 | `GET /api/v1/check` | the app asks for updates and announcements (`x-app-key`) |
 | `GET /api/v1/health` | status check |
+| `GET /api/v1/update-key` | the public key updates are signed with |
 | `/api/admin/*` | the dashboard (signed-in session + `x-eastape-dashboard` header) |
 | `GET /api/cron/daily` | Vercel Cron: daily totals, removes raw events older than 180 days |
 
@@ -30,8 +31,8 @@ web/
 |---|---|
 | `DATABASE_URL` | Neon connection string (pooled) |
 | `APP_KEY` | shared key built into the app (`EASTAPE_APP_KEY` when building) |
-| `RELEASE_SIGNING_KEY` | Ed25519 private key that signs updates (`node scripts/gen-signing-key.mjs`). Keep a private backup: the app only installs updates signed with it. |
-| `CRON_SECRET` | protects the daily cron job |
+| `RELEASE_SIGNING_KEY` | optional. Without it the service creates its own update signing key on first use and keeps it in the database (`server_keys`); `GET /api/v1/update-key` shows the public half, which is built into the app. The app only installs updates signed with that key, so don't delete that row. |
+| `CRON_SECRET` | optional; lets only Vercel Cron run the daily job (without it the job runs at most every 30 minutes) |
 | `BLOB_READ_WRITE_TOKEN` | added automatically when the Blob store is connected |
 
 ## Publishing an update
