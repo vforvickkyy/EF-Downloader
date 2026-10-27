@@ -1,0 +1,21 @@
+{
+  "name": "eastape-downloader-cloud",
+  "private": true,
+  "version": "1.2.0",
+  "description": "Eastape Downloader cloud: usage stats, updates, announcements and the admin dashboard",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "create-admin": "node scripts/create-admin.mjs",
+    "test": "node --test test/*.test.mjs",
+    "vendor": "npx --yes esbuild@0.24.2 scripts/blob-client-entry.js --bundle --format=esm --platform=browser --minify --target=es2020 --conditions=browser --outfile=public/vendor/blob-client.js \"--banner:js=/* @vercel/blob 2.8.2 client (Apache-2.0), bundled by scripts/blob-client-entry.js */\""
+  },
+  "dependencies": {
+    "@vercel/blob": "2.8.2",
+    "postgres": "3.4.9"
+  }
+}

@@ -1,14 +1,18 @@
 # Eastape Downloader relay
 
-The app never contains an email address or mail password. Installation notices,
-registrations and support messages are sent to this small Google Apps Script web
-app, which emails them:
+Version 1.1 of the app sends installation notices, registrations and support
+messages to this small Google Apps Script web app, which emails them to Eastape
+Tech. The app never contains an email address or mail password, and the
+receiving addresses are kept in the script's properties, not in this repository:
 
-| Event | Sent to |
+| Event | Sent to (script property) |
 |---|---|
-| New installation / update / reinstall / portable first start | `tech@eastapefilms.com` |
-| New user (name + email entered on first start) | `tech@eastapefilms.com` |
-| Contact support form | `info@eastapefilms.com` (reply goes straight to the user) |
+| New installation / update / reinstall / portable first start | `INSTALLS_TO` |
+| New user (name + email entered on first start) | `INSTALLS_TO` |
+| Contact support form | `SUPPORT_TO` (reply goes straight to the user) |
+
+Version 1.2 and later talk to the cloud dashboard in [`web/`](../../web) instead.
+The relay can pass version 1.1 events on to that dashboard too (`CLOUD_URL`).
 
 ## Set it up (about 5 minutes)
 
@@ -20,8 +24,12 @@ app, which emails them:
 3. **Project Settings** (gear icon) → **Script properties** → **Add script property**:
    - `RELAY_TOKEN` = the token from your build configuration (`relay.env`, or the
      `EASTAPE_RELAY_TOKEN` GitHub secret).
+   - `INSTALLS_TO` = the address that gets installation and new-user notices.
+   - `SUPPORT_TO` = the address that gets Contact support messages.
    - Optional: `SHEET_ID` = the ID of a Google Sheet (the long part of its URL) to
      also log every event as a row.
+   - Optional: `CLOUD_URL` = the dashboard's address and `CLOUD_APP_KEY` = its
+     `APP_KEY`, so version 1.1 users also appear in the dashboard.
 4. **Deploy** → **New deployment** → gear → **Web app**:
    - Execute as: **Me**
    - Who has access: **Anyone**
@@ -43,6 +51,7 @@ are never delivered, so always set it before sharing an installer.
   from Google Workspace.
 - The script accepts at most 20 events an hour per installation, 5 of them support
   messages, to stop spam.
-- To change the receiving addresses, edit `INSTALLS_TO` / `SUPPORT_TO` in the script
-  and deploy a **new version** (Deploy → Manage deployments → edit → New version).
-  The URL stays the same, so the app doesn't need rebuilding.
+- To change the receiving addresses, edit the `INSTALLS_TO` / `SUPPORT_TO` script
+  properties. To change the code, paste the new `Code.gs` and deploy a **new
+  version** (Deploy → Manage deployments → edit → New version). The URL stays the
+  same, so the app doesn't need rebuilding.

@@ -1,19 +1,24 @@
 /**
  * Eastape Downloader relay (Google Apps Script web app).
  *
- * The app sends installation notices, registrations and support messages
- * here; this script emails them to Eastape Tech. The email addresses live only
- * in this script, never in the app. Setup steps: see README.md next to this
- * file.
+ * Version 1.1 of the app sends installation notices, registrations and
+ * support messages here; this script emails them to Eastape Tech and can also
+ * pass them on to the Eastape Downloader cloud dashboard. The email addresses
+ * are kept in the script's properties, never in the app or in this file.
+ * Setup steps: see README.md next to this file.
  *
  * Script properties (Project Settings -> Script properties):
- *   RELAY_TOKEN  required. Must match the token built into the app.
- *   SHEET_ID     optional. A Google Sheet ID; every event is also logged
- *                there as a row (handy for counting installs).
+ *   RELAY_TOKEN    required. Must match the token built into the app.
+ *   INSTALLS_TO    email address for installation and new-user notices.
+ *   SUPPORT_TO     email address for Contact support messages.
+ *   SHEET_ID       optional. A Google Sheet ID; every event is also logged
+ *                  there as a row.
+ *   CLOUD_URL      optional. The dashboard's address, e.g.
+ *                  https://eastape-downloader.vercel.app; events are also sent
+ *                  there so version 1.1 users show up in the dashboard.
+ *   CLOUD_APP_KEY  required with CLOUD_URL. The dashboard's APP_KEY.
  */
 
-var INSTALLS_TO = 'tech@eastapefilms.com';
-var SUPPORT_TO = 'info@eastapefilms.com';
 var SENDER_NAME = 'Eastape Downloader';
 
 function doPost(e) {
@@ -26,23 +31,26 @@ function doPost(e) {
     var ev = clean_(body.event || {});
     if (!rateOk_(ev)) return reply_({ ok: false, error: 'rate limited' });
 
+    var installsTo = props.getProperty('INSTALLS_TO');
+    var supportTo = props.getProperty('SUPPORT_TO');
     switch (ev.type) {
       case 'install':
       case 'update':
       case 'reinstall':
       case 'first_run':
-        mailInstall_(ev);
+        if (installsTo) mailInstall_(installsTo, ev);
         break;
       case 'register':
-        mailRegister_(ev);
+        if (installsTo) mailRegister_(installsTo, ev);
         break;
       case 'support':
-        mailSupport_(ev);
+        if (supportTo) mailSupport_(supportTo, ev);
         break;
       default:
         return reply_({ ok: false, error: 'unknown type' });
     }
     logRow_(props.getProperty('SHEET_ID'), ev);
+    forward_(props.getProperty('CLOUD_URL'), props.getProperty('CLOUD_APP_KEY'), ev);
     return reply_({ ok: true });
   } catch (err) {
     return reply_({ ok: false, error: String(err) });
@@ -54,7 +62,7 @@ function doGet() {
   return reply_({ ok: true, service: 'eastape-relay' });
 }
 
-function mailInstall_(ev) {
+function mailInstall_(to, ev) {
   var titles = {
     install: 'New installation',
     update: 'Updated',
@@ -74,10 +82,10 @@ function mailInstall_(ev) {
     'The user is asked for their name and email when the app first opens; a separate',
     '"New user" email follows when they register.',
   ];
-  MailApp.sendEmail({ to: INSTALLS_TO, subject: subject, body: lines.join('\n'), name: SENDER_NAME });
+  MailApp.sendEmail({ to: to, subject: subject, body: lines.join('\n'), name: SENDER_NAME });
 }
 
-function mailRegister_(ev) {
+function mailRegister_(to, ev) {
   var subject = 'New user: ' + ev.name + ' <' + ev.email + '>';
   var lines = [
     'A user registered Eastape Downloader.',
@@ -89,10 +97,10 @@ function mailRegister_(ev) {
     'Install ID:   ' + ev.installId,
     'Time (UTC):   ' + ev.time,
   ];
-  MailApp.sendEmail({ to: INSTALLS_TO, subject: subject, body: lines.join('\n'), name: SENDER_NAME, replyTo: ev.email });
+  MailApp.sendEmail({ to: to, subject: subject, body: lines.join('\n'), name: SENDER_NAME, replyTo: ev.email });
 }
 
-function mailSupport_(ev) {
+function mailSupport_(to, ev) {
   var subject = '[Support] ' + (ev.topic || 'Message') + ' from ' + ev.name;
   var lines = [
     'From:     ' + ev.name + ' <' + ev.email + '>',
@@ -107,7 +115,7 @@ function mailSupport_(ev) {
     lines.push('', '---- Technical details (shared by the user) ----', ev.details);
   }
   lines.push('', 'Reply to this email to answer the user.');
-  MailApp.sendEmail({ to: SUPPORT_TO, subject: subject, body: lines.join('\n'), name: SENDER_NAME, replyTo: ev.email });
+  MailApp.sendEmail({ to: to, subject: subject, body: lines.join('\n'), name: SENDER_NAME, replyTo: ev.email });
 }
 
 // At most 20 events an hour per installation, 5 of them support messages.
@@ -154,6 +162,39 @@ function logRow_(sheetId, ev) {
     sheet.appendRow([ev.time, ev.type, ev.installId, ev.appVersion, ev.os, ev.name, ev.email, ev.topic]);
   } catch (err) {
     // Logging is optional; never fail the request because of it.
+  }
+}
+
+// Passes the event on to the cloud dashboard (POST /api/v1/ingest).
+function forward_(url, key, ev) {
+  if (!url || !key || !/^[a-f0-9]{16,64}$/.test(ev.installId)) return;
+  var props = { source: ev.source };
+  if (ev.prevVersion) props.prevVersion = ev.prevVersion;
+  if (ev.type === 'register' || ev.type === 'support') {
+    props.name = ev.name;
+    props.email = ev.email;
+  }
+  if (ev.type === 'support') {
+    props.topic = ev.topic;
+    props.message = ev.message;
+    props.details = ev.details;
+  }
+  try {
+    UrlFetchApp.fetch(url.replace(/\/+$/, '') + '/api/v1/ingest', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-app-key': key },
+      muteHttpExceptions: true,
+      payload: JSON.stringify({
+        installId: ev.installId,
+        appVersion: ev.appVersion,
+        os: ev.os,
+        source: ev.source,
+        events: [{ type: ev.type, ts: ev.time, props: props }],
+      }),
+    });
+  } catch (err) {
+    // The emails already went out; the dashboard copy is best effort.
   }
 }
 
