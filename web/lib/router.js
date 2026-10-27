@@ -49,9 +49,11 @@ const routes = [
   return { method, re, names, handler };
 });
 
-async function health() {
+async function health(request) {
   const [row] = await db()`select max(version) as v from schema_migrations`;
-  return json({ ok: true, service: 'eastape-downloader', schema: Number(row.v || 0), time: new Date().toISOString() });
+  // Names of the query parameters that arrived, to check rewrites keep them.
+  const params = [...new URL(request.url).searchParams.keys()].filter((k) => k !== '__path').slice(0, 10);
+  return json({ ok: true, service: 'eastape-downloader', schema: Number(row.v || 0), params, time: new Date().toISOString() });
 }
 
 /** The public key the app checks update signatures with (not a secret). */

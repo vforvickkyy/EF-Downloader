@@ -29,11 +29,12 @@ import (
 // Service address and keys. AppKey is set at build time with
 // -ldflags "-X eastape/internal/cloud.AppKey=..."; the others can be.
 var (
-	APIURL = ""
+	APIURL = "https://eastape-downloader.vercel.app"
 	AppKey = ""
 	// UpdateKey is the Ed25519 public key (base64) whose signature every
-	// update must carry. It matches RELEASE_SIGNING_KEY on the service.
-	UpdateKey = "aeaXIYzvBubtN+em/W327/Gf+FcDHXyFEh6hnR8yiB8="
+	// update must carry: the public half of the service's signing key
+	// (GET /api/v1/update-key).
+	UpdateKey = "o7NF1zvTF0v+gHfrnfR2CeT7R0heCAFr17Lc5nVonYk="
 )
 
 // ErrNotConfigured means this build has no service address.

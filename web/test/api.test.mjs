@@ -83,7 +83,9 @@ test('unknown routes and methods', { skip }, async () => {
   assert.equal((await call('GET', '/api/v1/nope')).status, 404);
   assert.equal((await call('GET', '/api/v1/ingest')).status, 405);
   // Vercel rewrite form
-  assert.equal((await call('GET', '/api/main?__path=/api/v1/health')).status, 200);
+  const viaRewrite = await call('GET', '/api/main?__path=/api/v1/health&version=1.2.0');
+  assert.equal(viaRewrite.status, 200);
+  assert.deepEqual(viaRewrite.data.params, ['version']);
 });
 
 test('ingest needs the app key and a valid install ID', { skip }, async () => {
