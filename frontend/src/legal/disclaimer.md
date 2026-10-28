@@ -1,12 +1,12 @@
 # Disclaimer
 
-Eastape Downloader · Version 1.2 · Effective 23 October 2026
+Eastape Downloader · Version 1.3 · Effective 28 October 2026
 
 **Eastape Downloader is a helper tool.** It makes it easier to download files that their owners have already shared publicly on Google Drive with "Anyone with the link".
 
 ## Independent software
 
-Eastape Downloader is developed by Eastape Tech. It is not affiliated with, endorsed, sponsored or approved by Google LLC. "Google", "Google Drive", "Google Docs", "Google Sheets" and "Google Slides" are trademarks of Google LLC and are used only to describe what the Software works with.
+Eastape Downloader is independent software made by Eastape Tech ("we", "us"). It is not affiliated with, endorsed, sponsored or approved by Google LLC. "Google", "Google Drive", "Google Docs", "Google Sheets" and "Google Slides" are trademarks of Google LLC and are used only to describe what the Software works with.
 
 ## Works within Google's sharing settings
 
@@ -18,11 +18,15 @@ If a file isn't public, or Google temporarily limits its downloads, the Software
 
 ## Your responsibility
 
-Being able to open a link does not mean you have the right to copy or use its content. You are responsible for making sure you may download and use each file, and for following copyright law, Google's Terms of Service and the laws of your country. Eastape Tech does not host, check or control any content downloaded with the Software and is not responsible for it.
+Being able to open a link does not mean you have the right to copy or use its content. You are responsible for making sure you may download and use each file, and for following copyright law, Google's Terms of Service and the laws of your country. We do not host, check or control any content downloaded with the Software and are not responsible for it.
 
 ## Personal, non-commercial use
 
-The Software is licensed for personal, non-commercial use only. Commercial use requires written permission from Eastape Tech.
+The Software is licensed for personal, non-commercial use only. Commercial use requires our written permission.
+
+## Data the Software sends
+
+To work, the Software sends registration details and usage statistics to us, as described in the Privacy Policy. It never sends the links you paste, your file names or your files.
 
 ## No guarantee
 

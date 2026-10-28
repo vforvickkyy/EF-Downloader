@@ -1,12 +1,12 @@
 # Terms and Conditions
 
-Eastape Downloader · Version 1.2 · Effective 27 October 2026
+Eastape Downloader · Version 1.3 · Effective 28 October 2026
 
-These Terms and Conditions ("Terms") are an agreement between you and Eastape Tech ("Eastape Tech", "we", "us") for the use of Eastape Downloader ("the Software"). By installing, registering or using the Software you agree to these Terms, our Privacy Policy and our Disclaimer. If you do not agree, do not install or use the Software.
+These Terms and Conditions ("Terms") are an agreement between you and Eastape Tech ("we", "us"), the maker of Eastape Downloader ("the Software"). By installing, registering or using the Software you agree to these Terms, our Privacy Policy and our Disclaimer. If you do not agree, do not install or use the Software.
 
 ## 1. Licence
 
-Eastape Tech grants you a free, limited, personal, non-exclusive, non-transferable and revocable licence to install and use the Software on devices you own or control, **for personal, non-commercial use only**.
+We grant you a free, limited, personal, non-exclusive, non-transferable and revocable licence to install and use the Software on devices you own or control, **for personal, non-commercial use only**.
 
 You may share the unmodified official installer with other people for their own personal use. Each person who installs it must accept these Terms.
 
@@ -14,15 +14,17 @@ You may share the unmodified official installer with other people for their own 
 
 You must not:
 
-- use the Software for any commercial purpose, including offering downloads as a paid service or using it within a business, without written permission from Eastape Tech;
+- use the Software for any commercial purpose, including offering downloads as a paid service or using it within a business, without our written permission;
 - sell, rent, lease, sublicense or charge for the Software;
 - modify, decompile or reverse engineer the Software, or create derivative works from it, except where the law expressly allows this;
 - remove or change its name, logo, copyright notices or these Terms;
 - distribute modified, repackaged or bundled copies, or present the Software as your own.
 
-## 3. Registration
+## 3. Registration and usage statistics
 
-When the Software starts for the first time it asks for your name and email address. Please give accurate details. They are handled as described in our Privacy Policy.
+Before you can use the Software it asks for your name and email address and for your acceptance of these Terms, the Privacy Policy and the Disclaimer. Registration is required. Please give accurate details.
+
+To provide, support and improve the Software, it sends us usage statistics as described in the Privacy Policy (never your links, file names or files). This is a condition of using the Software and cannot be switched off. If you do not want this, do not use the Software.
 
 ## 4. Acceptable use
 
@@ -39,17 +41,17 @@ The Software is an independent tool. It is not affiliated with, endorsed or spon
 
 ## 6. Privacy
 
-Our Privacy Policy explains what information the Software collects and how it is used. By using the Software you agree to it.
+Our Privacy Policy explains what information the Software collects and how it is used.
 
 ## 7. Updates and support
 
-We may release updates, change features or stop providing the Software at any time. The Software checks for updates automatically and offers them in the app; an update is installed only when you choose "Update now", except that we may mark an update as required (for example to fix a security problem), in which case the Software asks you to install it before continuing. Updates are signed by Eastape Tech, and the Software checks the signature before installing one. The Software may also show announcements from Eastape Tech about the Software.
+We may release updates, change features or stop providing the Software at any time. The Software checks for updates automatically and offers them in the app; an update is installed only when you choose "Update now", except that we may mark an update as required (for example to fix a security problem), in which case the Software asks you to install it before continuing. Updates are signed by us, and the Software checks the signature before installing one. The Software may also show our announcements about the Software.
 
 Support is provided on a best-effort basis through Contact Support in the app.
 
 ## 8. Intellectual property
 
-The Software, its name, logo and design belong to Eastape Tech and are protected by copyright and other laws. Third-party components are used under their own licences (see Open-source licences). These Terms give you no rights to our name or trademarks.
+The Software, its name, logo and design belong to us and are protected by copyright and other laws. Third-party components are used under their own licences (see Open-source licences). These Terms give you no rights to our name or trademarks.
 
 ## 9. No warranty
 
@@ -57,11 +59,11 @@ The Software is provided "as is" and "as available", without warranties of any k
 
 ## 10. Limitation of liability
 
-To the fullest extent permitted by law, Eastape Tech and its developers are not liable for any indirect, incidental, special, consequential or punitive damages, or for any loss of data, files, profits or time, arising from the use of or inability to use the Software, or from content downloaded with it. Where liability cannot be excluded, it is limited to the amount you paid for the Software.
+To the fullest extent permitted by law, we and our developers are not liable for any indirect, incidental, special, consequential or punitive damages, or for any loss of data, files, profits or time, arising from the use of or inability to use the Software, or from content downloaded with it. Where liability cannot be excluded, it is limited to the amount you paid for the Software.
 
 ## 11. Indemnity
 
-You agree to indemnify and hold harmless Eastape Tech and its developers against claims arising from your use of the Software or your breach of these Terms, including any claim that content you downloaded infringed someone's rights.
+You agree to indemnify and hold harmless us and our developers against claims arising from your use of the Software or your breach of these Terms, including any claim that content you downloaded infringed someone's rights.
 
 ## 12. Termination
 
@@ -69,7 +71,7 @@ This licence ends automatically if you break these Terms. You must then stop usi
 
 ## 13. Changes to these Terms
 
-We may update these Terms. The current version is always available in the app under Settings → Legal. Continuing to use the Software after a change means you accept the updated Terms.
+We may update these Terms. The current version is always available in the app under Settings → Legal. When we make important changes, the Software asks you to accept them before you continue; continuing to use the Software after a change means you accept the updated Terms.
 
 ## 14. Contact
 

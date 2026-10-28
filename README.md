@@ -2,7 +2,7 @@
 
 <h1 align="center">Eastape Downloader</h1>
 
-<p align="center"><b>Made by Creators, for Creators</b><br>Download whole public Google Drive folders on Windows, with the same folder structure, a speed limit, and pause / resume.<br>Version 1.2 · Developed by Eastape Tech · © 2026 Eastape Tech. All rights reserved.</p>
+<p align="center"><b>Made by Creators, for Creators</b><br>Download whole public Google Drive folders on Windows, with the same folder structure, a speed limit, and pause / resume.<br>Version 1.3 · © 2026 Eastape Tech. All rights reserved.</p>
 
 ---
 
@@ -38,9 +38,9 @@ Because the files aren't code-signed yet, Windows SmartScreen shows "Windows pro
 ## Dashboard, stats, updates and support
 
 - The **Eastape Downloader cloud** ([`web/`](web), on Vercel + Neon) receives installs, registrations, support messages and anonymous usage stats, offers updates and announcements, and has the **admin dashboard** (live users, downloads, data, versions, problems, support inbox, update publishing, announcements, team). See **[web/README.md](web/README.md)**.
-- On first start the app asks for the user's **name and email** (required) and acceptance of the Terms, Privacy Policy and Disclaimer.
+- On first start a **welcome screen** walks new users through setup: **name and email are required**, with acceptance of the Terms, Privacy Policy and Disclaimer, and the app can't be used until it's done. When the terms change (`termsVersion` in `app.go`), existing users accept the new version once.
 - Every installation, update and reinstall is reported once, even if the user never registers.
-- Usage stats never include links or file names, and users can turn them off in Settings → Privacy.
+- Usage stats are always sent (since 1.3; disclosed in the Privacy Policy and Terms) and never include links, file names or files.
 - Install notices, registrations and support messages can also be emailed through a private relay in your Google account ([server/apps-script/README.md](server/apps-script/README.md)); the receiving addresses live only in the relay's settings.
 - Without a network the app keeps everything in an outbox and sends it later.
 - Everything that is collected is listed in the Privacy Policy (`frontend/src/legal/privacy.md`). Change the policy if you change what is sent.
@@ -55,12 +55,13 @@ You need Go 1.23+, the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/w
 #   relay.env:  EASTAPE_RELAY_URL=https://script.google.com/macros/s/.../exec   (optional email relay)
 #               EASTAPE_RELAY_TOKEN=<same value as the RELAY_TOKEN script property>
 
-./scripts/build-windows.sh            # → build/bin/EastapeDownloader.exe + EastapeDownloader-Setup-1.2.0.exe
+./scripts/build-windows.sh            # → build/bin/EastapeDownloader.exe + EastapeDownloader-Setup-1.3.0.exe
 go test -race ./internal/...          # tests
 python3 scripts/gen-licenses.py       # refresh the open-source licences page after changing dependencies
+python3 scripts/make-icons.py icon.png # new 1024x1024 icon → app icon, logos, favicons, installer art
 ```
 
-GitHub Actions builds both files on every push (download them from the run's *Artifacts*). Add the repository secret `EASTAPE_APP_KEY` (and optionally `EASTAPE_RELAY_URL` / `EASTAPE_RELAY_TOKEN`) so those builds can talk to the service. Pushing a tag like `v1.2.0` attaches the files to a GitHub Release.
+GitHub Actions builds both files on every push (download them from the run's *Artifacts*). Add the repository secret `EASTAPE_APP_KEY` (and optionally `EASTAPE_RELAY_URL` / `EASTAPE_RELAY_TOKEN`) so those builds can talk to the service. Pushing a tag like `v1.3.0` attaches the files to a GitHub Release.
 
 To ship an update to existing users, upload the new Setup in the dashboard (**Updates → New update**) and publish it.
 

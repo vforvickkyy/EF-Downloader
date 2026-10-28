@@ -126,6 +126,8 @@ func (a *App) Register(name, email string) (settings.Settings, error) {
 	a.settings.UserName, a.settings.UserEmail = name, email
 	if first {
 		a.settings.RegisteredAt = time.Now().UTC().Format(time.RFC3339)
+		// Registering includes accepting the Terms, Privacy Policy and Disclaimer.
+		a.settings.TermsAccepted = termsVersion
 	}
 	s := a.settings
 	a.mu.Unlock()
@@ -146,6 +148,27 @@ func (a *App) Register(name, email string) (settings.Settings, error) {
 		a.sendSoon()
 	}
 	return s, nil
+}
+
+// AcceptTerms records that the user accepted the current Terms, Privacy
+// Policy and Disclaimer (asked after they change).
+func (a *App) AcceptTerms() (settings.Settings, error) {
+	a.mu.Lock()
+	a.settings.TermsAccepted = termsVersion
+	s := a.settings
+	a.mu.Unlock()
+	a.track("setting", map[string]any{"name": "terms_accepted", "value": termsVersion})
+	return s, a.save(s)
+}
+
+// requireSetup refuses to work until the user has registered and accepted
+// the current terms.
+func (a *App) requireSetup() error {
+	s := a.GetSettings()
+	if s.RegisteredAt == "" || s.TermsAccepted != termsVersion {
+		return errors.New("Please finish setting up Eastape Downloader first.")
+	}
+	return nil
 }
 
 // SupportRequest is the contact-support form.
@@ -286,10 +309,8 @@ func reportInstall() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Usage stats are on by default; the setting lives with the user's settings.
-	stats := !settings.Load().StatsOff
 	c := cloud.Open("", func() cloud.Identity {
-		return cloud.Identity{InstallID: id, Version: version, OS: ev.OS, Source: "installer", Stats: stats}
+		return cloud.Identity{InstallID: id, Version: version, OS: ev.OS, Source: "installer", Stats: true}
 	})
 	props := map[string]any{"source": "installer"}
 	if ev.PrevVersion != "" {

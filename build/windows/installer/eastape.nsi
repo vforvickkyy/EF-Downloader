@@ -42,7 +42,7 @@ RequestExecutionLevel user
 Name "${APP_NAME}"
 Caption "${APP_NAME} ${VERSION} Setup"
 UninstallCaption "${APP_NAME} Uninstall"
-BrandingText "${APP_NAME} ${VERSION} · ${COMPANY}"
+BrandingText "${APP_NAME} ${VERSION}"
 OutFile "${OUT_DIR}\EastapeDownloader-Setup-${VERSION}.exe"
 InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 ShowInstDetails hide
@@ -87,7 +87,7 @@ Var OldDir     ; folder of a version 1.1 installation for all users
 
 ; ---------------------------------------------------------------- pages
 !define MUI_WELCOMEPAGE_TITLE "Welcome to ${APP_NAME} ${VERSION}"
-!define MUI_WELCOMEPAGE_TEXT "This will install ${APP_NAME} ${VERSION} by ${COMPANY} on your computer.$\r$\n$\r$\nDownload whole public Google Drive folders with the same folder structure, a speed limit you choose, and pause / resume.$\r$\n$\r$\n${SLOGAN}.$\r$\n$\r$\nFor personal, non-commercial use. Click Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "This will install ${APP_NAME} ${VERSION} on your computer.$\r$\n$\r$\nDownload whole public Google Drive folders with the same folder structure, a speed limit you choose, and pause / resume.$\r$\n$\r$\n${SLOGAN}.$\r$\n$\r$\nFor personal, non-commercial use. Click Next to continue."
 !insertmacro MUI_PAGE_WELCOME
 
 !define MUI_LICENSEPAGE_RADIOBUTTONS

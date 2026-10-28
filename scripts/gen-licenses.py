@@ -8,21 +8,51 @@ import os
 import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+with open(os.path.join(ROOT, "wails.json"), encoding="utf-8") as f:
+    VERSION = ".".join(__import__("json").load(f)["info"]["productVersion"].split(".")[:2])
 
-# (module, display name, licence) for everything linked into the Windows exe
-# (see `go version -m EastapeDownloader.exe`).
-MODULES = [
-    ("github.com/wailsapp/wails/v2", "Wails", "MIT"),
-    ("github.com/wailsapp/go-webview2", "go-webview2", "MIT"),
-    ("github.com/leaanthony/go-ansi-parser", "go-ansi-parser", "MIT"),
-    ("github.com/leaanthony/slicer", "slicer", "MIT"),
-    ("github.com/leaanthony/u", "u", "MIT"),
-    ("github.com/rivo/uniseg", "uniseg", "MIT"),
-    ("github.com/pkg/errors", "errors", "BSD 2-Clause"),
-    ("golang.org/x/net", "Go networking libraries", "BSD 3-Clause"),
-    ("golang.org/x/sys", "Go system libraries", "BSD 3-Clause"),
-    ("golang.org/x/time", "Go rate limiting library", "BSD 3-Clause"),
-]
+# Friendlier names for some modules; others are listed by their path.
+NAMES = {
+    "github.com/wailsapp/wails/v2": "Wails",
+    "github.com/wailsapp/go-webview2": "go-webview2",
+    "github.com/wailsapp/mimetype": "mimetype",
+    "github.com/leaanthony/go-ansi-parser": "go-ansi-parser",
+    "github.com/leaanthony/slicer": "slicer",
+    "github.com/leaanthony/u": "u",
+    "github.com/rivo/uniseg": "uniseg",
+    "github.com/pkg/errors": "errors",
+    "github.com/pkg/browser": "browser",
+    "github.com/bep/debounce": "debounce",
+    "github.com/go-ole/go-ole": "go-ole",
+    "github.com/google/uuid": "uuid",
+    "github.com/samber/lo": "lo",
+    "github.com/tkrajina/go-reflector": "go-reflector",
+    "golang.org/x/net": "Go networking libraries",
+    "golang.org/x/sys": "Go system libraries",
+    "golang.org/x/text": "Go text libraries",
+    "golang.org/x/time": "Go rate limiting library",
+}
+
+
+def modules():
+    """Every module compiled into the Windows app (same tags as wails build)."""
+    env = dict(os.environ, GOTOOLCHAIN="local", GOOS="windows", GOARCH="amd64", CGO_ENABLED="0")
+    out = subprocess.check_output(
+        ["go", "list", "-deps", "-tags", "desktop,production",
+         "-f", "{{with .Module}}{{if not .Main}}{{.Path}}{{end}}{{end}}", "."],
+        cwd=ROOT, env=env, text=True)
+    return sorted(set(out.split()))
+
+
+def licence_kind(text):
+    head = text[:3000]
+    if "Apache License" in head:
+        return "Apache 2.0"
+    if "Permission is hereby granted, free of charge" in head:
+        return "MIT"
+    if "Redistribution and use in source and binary forms" in head:
+        return "BSD 3-Clause" if "Neither the name" in head or "names of its contributors" in head else "BSD 2-Clause"
+    raise SystemExit("unknown licence:\n" + head[:300])
 
 
 def module_dir(mod):
@@ -49,7 +79,7 @@ def main():
     out = [
         "# Open-source licences",
         "",
-        "Eastape Downloader · Version 1.2",
+        f"Eastape Downloader · Version {VERSION}",
         "",
         "Eastape Downloader is © 2026 Eastape Tech. All rights reserved. It is built with the open-source software below, used under the licence shown for each. We are grateful to their authors.",
         "",
@@ -57,19 +87,22 @@ def main():
         "",
         "- **Go** programming language and standard library: BSD 3-Clause, Copyright 2009 The Go Authors",
     ]
-    for mod, name, lic in MODULES:
-        out.append(f"- **{name}** ({mod}): {lic}")
+    texts = []
+    for mod in modules():
+        text = licence_text(module_dir(mod))
+        name = NAMES.get(mod, mod)
+        out.append(f"- **{name}** ({mod}): {licence_kind(text)}")
+        texts += [f"### {name} ({mod})", "", "```", text, "```", ""]
     out.append("- **Microsoft Edge WebView2 Runtime**: Microsoft Software License Terms. Provided by Microsoft as part of Windows, or installed by the Eastape Downloader installer when missing.")
+    out.append("- **NSIS** (Nullsoft Scriptable Install System), used to build the installer: zlib/libpng licence")
     out += ["", "## Licence texts", ""]
-
     out += ["### Go", "", "```", go_root_licence(), "```", ""]
-    for mod, name, _ in MODULES:
-        out += [f"### {name} ({mod})", "", "```", licence_text(module_dir(mod)), "```", ""]
+    out += texts
 
     out += [
         "## Credits",
         "",
-        "Eastape Downloader is developed by Eastape Tech. Made by Creators, for Creators.",
+        "Made by Creators, for Creators.",
         "",
         "Developer: Navi Joshi & Veerinder Singh",
         "",

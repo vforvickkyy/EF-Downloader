@@ -31,8 +31,9 @@ type Settings struct {
 	InstallID    string `json:"installId"`
 	ReportedID   string `json:"reportedId"` // install ID whose installation notice was queued
 
-	// StatsOff stops anonymous usage stats (Settings > Privacy).
-	StatsOff bool `json:"statsOff"`
+	// TermsAccepted is the version of the Terms, Privacy Policy and
+	// Disclaimer the user accepted (see termsVersion in app.go).
+	TermsAccepted string `json:"termsAccepted,omitempty"`
 
 	// Announcements the user has seen or closed, and update bookkeeping;
 	// changed only by the app.
@@ -50,6 +51,7 @@ func (s Settings) KeepIdentity(cur Settings) Settings {
 	s.InstallID, s.ReportedID = cur.InstallID, cur.ReportedID
 	s.SeenNotices, s.DismissedNotices = cur.SeenNotices, cur.DismissedNotices
 	s.LastVersion, s.PendingUpdate = cur.LastVersion, cur.PendingUpdate
+	s.TermsAccepted = cur.TermsAccepted
 	return s
 }
 

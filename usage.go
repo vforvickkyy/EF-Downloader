@@ -1,8 +1,8 @@
 package main
 
-// Anonymous usage stats: what the app is used for, never which links or
-// files. They go to the Eastape Downloader service (internal/cloud) and can
-// be turned off in Settings > Privacy.
+// Usage stats: what the app is used for, never which links or files. They
+// go to the Eastape Downloader service (internal/cloud) and are part of
+// using the app (see the Privacy Policy).
 
 import (
 	"context"
@@ -55,7 +55,7 @@ func newCloud(a *App) *cloud.Client {
 	osName := feedback.OSVersion()
 	return cloud.Open(cloudOutboxPath(), func() cloud.Identity {
 		s := a.GetSettings()
-		return cloud.Identity{InstallID: s.InstallID, Version: version, OS: osName, Source: source, Stats: !s.StatsOff}
+		return cloud.Identity{InstallID: s.InstallID, Version: version, OS: osName, Source: source, Stats: true}
 	})
 }
 

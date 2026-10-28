@@ -3,9 +3,9 @@
 // or an announcement is waiting, and downloads and verifies updates.
 //
 // Events wait in an outbox file until they are delivered, so nothing is lost
-// while the computer is offline. When the user turns usage stats off, only
-// the essential events (installation, registration, support messages and the
-// switch itself) are sent.
+// while the computer is offline. An Identity with Stats false sends only the
+// essential events (installation, registration and support messages); the
+// app itself always allows usage stats since version 1.3.
 package cloud
 
 import (
@@ -133,15 +133,6 @@ func trim(q []Event, max int) []Event {
 		out = append(out, e)
 	}
 	return out
-}
-
-// DropUsage removes waiting usage events (when the user turns stats off),
-// keeping the essential ones.
-func (c *Client) DropUsage() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.queue = trim(c.queue, 0)
-	c.saveLocked()
 }
 
 // Len returns how many events are waiting.

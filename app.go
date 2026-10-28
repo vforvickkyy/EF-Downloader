@@ -30,7 +30,12 @@ const (
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
-var version = "1.2.0"
+var version = "1.3.0"
+
+// termsVersion names the current Terms and Conditions, Privacy Policy and
+// Disclaimer. Users accept it when they register; when it changes, everyone
+// is asked to accept the new version before continuing.
+const termsVersion = "2026-10-28"
 
 // App is the bridge between the window (frontend) and the download engine.
 // Its exported methods are callable from JavaScript.
@@ -184,19 +189,8 @@ func (a *App) SaveSettings(s settings.Settings) (settings.Settings, error) {
 	a.mu.Lock()
 	s = s.KeepIdentity(a.settings)
 	keyChanged := s.APIKey != a.settings.APIKey
-	statsChanged := s.StatsOff != a.settings.StatsOff
 	a.settings = s
 	a.mu.Unlock()
-
-	if statsChanged {
-		if s.StatsOff {
-			a.cloud.DropUsage()
-			a.track("stats_disabled", nil)
-		} else {
-			a.track("stats_enabled", nil)
-		}
-		a.sendSoon()
-	}
 
 	a.mgr.SetLimit(s.SpeedLimitKB * 1024)
 	a.mgr.SetParallel(s.Parallel)
@@ -341,6 +335,9 @@ type ScanResult struct {
 
 // Scan reads the links and lists everything in them.
 func (a *App) Scan(input string) (*ScanResult, error) {
+	if err := a.requireSetup(); err != nil {
+		return nil, err
+	}
 	if a.mgr.Busy() {
 		return nil, errors.New("A download is in progress. Stop it before opening another link.")
 	}
@@ -418,6 +415,9 @@ func (a *App) CancelScan() {
 // Start downloads the selected files (indexes into the scanned nodes; empty
 // or null downloads everything).
 func (a *App) Start(selected []int) error {
+	if err := a.requireSetup(); err != nil {
+		return err
+	}
 	s := a.GetSettings()
 	if err := os.MkdirAll(s.DownloadDir, 0o755); err != nil {
 		a.diag.add("download folder", err)
@@ -557,5 +557,6 @@ func (a *App) AppInfo() map[string]string {
 		"edition":      "Personal use",
 		"os":           feedback.OSVersion(),
 		"cloud":        fmt.Sprint(cloud.Configured()),
+		"termsVersion": termsVersion,
 	}
 }

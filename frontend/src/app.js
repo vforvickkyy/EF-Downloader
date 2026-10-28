@@ -100,10 +100,8 @@
   }
 
   // ---------------------------------------------------------------- file kinds
-  const KIND_COLOR = {
-    folder: '#fbbf24', video: '#f472b6', image: '#34d399', audio: '#a78bfa', archive: '#fb923c',
-    pdf: '#f87171', doc: '#60a5fa', sheet: '#4ade80', slides: '#f59e0b', code: '#22d3ee', app: '#94a3b8', file: '#94a3b8',
-  };
+  // Monochrome: folders in silver, files in grey; the glyph tells the type.
+  const KIND_COLOR = new Proxy({}, { get: (_, kind) => (kind === 'folder' ? 'var(--kind-folder)' : 'var(--kind-file)') });
   const EXT_KIND = {};
   const addExt = (kind, list) => list.split(' ').forEach((e) => { EXT_KIND[e] = kind; });
   addExt('video', 'mp4 mkv mov avi webm m4v wmv flv mpg mpeg 3gp ts m2ts vob');
@@ -202,7 +200,6 @@
     $('setRetries').value = String([0, 1, 2, 3, 5].includes(s.retries) ? s.retries : 3);
     $('setSleep').checked = s.preventSleep;
     $('setOpenDone').checked = s.openWhenDone;
-    $('setStats').checked = !s.statsOff;
     renderLimit(s.speedLimitKB);
     $('parValue').textContent = s.parallel;
     $('changeDirBtn').disabled = busy();
@@ -287,10 +284,7 @@
       const step = w / (N - 1);
       const x0 = w - (data.length - 1) * step;
       const y = (v) => h - 2 - (v / max) * (h - 8);
-      const grad = g.createLinearGradient(0, 0, w, 0);
-      grad.addColorStop(0, '#22d3ee');
-      grad.addColorStop(0.5, '#3b82f6');
-      grad.addColorStop(1, '#a855f7');
+      const line = css.getPropertyValue('--accent-line').trim();
       g.beginPath();
       data.forEach((v, i) => {
         const px = x0 + i * step, py = y(v);
@@ -300,22 +294,22 @@
           g.bezierCurveTo((ppx + px) / 2, ppy, (ppx + px) / 2, py, px, py);
         }
       });
-      g.strokeStyle = grad;
+      g.strokeStyle = line;
       g.lineWidth = 2;
       g.stroke();
       g.lineTo(w, h);
       g.lineTo(x0, h);
       g.closePath();
       const fill = g.createLinearGradient(0, 0, 0, h);
-      fill.addColorStop(0, 'rgba(59,130,246,0.28)');
-      fill.addColorStop(1, 'rgba(168,85,247,0.02)');
+      fill.addColorStop(0, document.documentElement.dataset.theme === 'light' ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.16)');
+      fill.addColorStop(1, 'rgba(128,128,128,0)');
       g.fillStyle = fill;
       g.fill();
     }
     if (limit) {
       const ly = h - 2 - (limit / max) * (h - 8);
-      g.strokeStyle = css.getPropertyValue('--warn').trim();
-      g.globalAlpha = 0.7;
+      g.strokeStyle = css.getPropertyValue('--text-3').trim();
+      g.globalAlpha = 0.9;
       g.setLineDash([4, 4]);
       g.beginPath();
       g.moveTo(0, ly);
@@ -504,7 +498,7 @@
       jobIcon.dataset.kind = jobKind;
       jobIcon.innerHTML = icon(KIND_ICON[jobKind]);
       jobIcon.style.color = KIND_COLOR[jobKind];
-      jobIcon.style.background = `${KIND_COLOR[jobKind]}22`;
+      jobIcon.style.background = `color-mix(in srgb, ${KIND_COLOR[jobKind]} 14%, transparent)`;
     }
     $('jobTitle').textContent = S.job.title;
     $('jobTitle').title = S.job.title;
@@ -879,6 +873,7 @@
   };
 
   async function offerClipboard() {
+    if (setupNeeded()) return;
     if (S.phase === 'scanning' || linkInput.value.trim() || busy()) { $('clipHint').hidden = true; return; }
     let link = '';
     try { link = await api.ClipboardLink(); } catch (e) { return; }
@@ -899,6 +894,7 @@
     e.preventDefault();
     dragDepth = 0;
     $('linkWrap').classList.remove('drop');
+    if (setupNeeded()) return;
     const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
     if (text && text.trim()) {
       linkInput.value = text.trim().split(/\s+/).filter((l) => !l.startsWith('#')).join(' ');
@@ -908,15 +904,16 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!$('noticePanel').hidden) $('noticePanel').hidden = true;
-      else if (!$('docModal').hidden) $('docModal').hidden = true;
+      if (!$('docModal').hidden) $('docModal').hidden = true;
+      else if (setupNeeded()) { /* setup can't be skipped */ }
+      else if (!$('noticePanel').hidden) $('noticePanel').hidden = true;
       else if (!$('updateModal').hidden) closeUpdate();
       else if (!$('supportModal').hidden) closeSupport();
-      else if (!$('regModal').hidden) { if (!S.regFirst) $('regModal').hidden = true; }
+      else if (!$('regModal').hidden) $('regModal').hidden = true;
       else if (!$('limitModal').hidden) $('limitModal').hidden = true;
       else if ($('drawer').classList.contains('open')) closeDrawer();
     }
-    if (!$('regModal').hidden || !$('supportModal').hidden) return;
+    if (setupNeeded() || !$('regModal').hidden || !$('supportModal').hidden) return;
     const tag = (document.activeElement && document.activeElement.tagName) || '';
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
       linkInput.value = '';
@@ -993,7 +990,6 @@
   $('setRetries').onchange = (e) => saveSettings({ retries: Number(e.target.value) });
   $('setSleep').onchange = (e) => saveSettings({ preventSleep: e.target.checked });
   $('setOpenDone').onchange = (e) => saveSettings({ openWhenDone: e.target.checked });
-  $('setStats').onchange = (e) => saveSettings({ statsOff: !e.target.checked });
   $('keyEye').onclick = () => {
     const k = $('setKey');
     k.type = k.type === 'password' ? 'text' : 'password';
@@ -1050,24 +1046,14 @@
     $('profileAvatar').textContent = initials;
   }
 
-  function openRegistration(first) {
+  function openProfile() {
     const s = S.settings;
-    S.regFirst = first;
     $('regName').value = s.userName || '';
     $('regEmail').value = s.userEmail || '';
-    $('regTitle').textContent = first ? "Welcome! Let's get you set up" : 'Edit your profile';
-    $('regIntro').textContent = first
-      ? 'Tell us who you are to start using Eastape Downloader. It only takes a moment.'
-      : 'Update the name and email we use to reply to you.';
-    $('regAgreeLine').hidden = !first;
-    $('regAgree').checked = !first;
-    $('regCancel').hidden = first;
-    $('regSubmit').textContent = first ? 'Get started' : 'Save';
     $('regError').hidden = true;
     ['regName', 'regEmail'].forEach((id) => $(id).classList.remove('bad'));
-    $('regAgreeLine').classList.remove('bad');
     $('regModal').hidden = false;
-    setTimeout(() => $(first || !s.userName ? 'regName' : 'regEmail').focus(), 60);
+    setTimeout(() => $('regEmail').focus(), 60);
   }
 
   function formError(id, msg) {
@@ -1082,28 +1068,114 @@
     const email = $('regEmail').value.trim();
     $('regName').classList.toggle('bad', name.length < 2);
     $('regEmail').classList.toggle('bad', !EMAIL_RE.test(email));
-    $('regAgreeLine').classList.toggle('bad', S.regFirst && !$('regAgree').checked);
     if (name.length < 2) return formError('regError', 'Please enter your name.');
     if (!EMAIL_RE.test(email)) return formError('regError', 'Please enter a valid email address.');
-    if (S.regFirst && !$('regAgree').checked) return formError('regError', 'Please accept the Terms and Conditions, Privacy Policy and Disclaimer to continue.');
     formError('regError', '');
     const btn = $('regSubmit');
     btn.disabled = true;
     try {
       S.settings = await api.Register(name, email);
-      const first = S.regFirst;
       $('regModal').hidden = true;
       renderProfile();
-      if (first) toast('ok', `Welcome, ${name.split(' ')[0]}!`, "You're all set. Paste a Google Drive link to begin.");
-      else toast('ok', 'Profile updated');
+      toast('ok', 'Profile updated');
     } catch (err) {
       formError('regError', errText(err));
     } finally {
       btn.disabled = false;
     }
   });
-  $('regCancel').onclick = () => { if (!S.regFirst) $('regModal').hidden = true; };
-  $('profileEdit').onclick = () => openRegistration(!S.settings.registeredAt);
+  $('regCancel').onclick = () => { $('regModal').hidden = true; };
+  $('profileEdit').onclick = openProfile;
+
+  // ---------------------------------------------------------------- welcome
+  // New users must register (name, email, accepting the terms) before the
+  // app can be used; the Go side refuses to scan or download until then.
+  const OB = { page: 1 };
+
+  function onboarding(on) {
+    document.body.classList.toggle('onboarding', on);
+  }
+
+  function showObPage(n) {
+    OB.page = n;
+    document.querySelectorAll('#welcome .ob-page').forEach((p) => { p.hidden = Number(p.dataset.page) !== n; });
+    document.querySelectorAll('#welcome .ob-steps i').forEach((d, i) => d.classList.toggle('on', i === n - 1));
+    if (n === 2) setTimeout(() => $(S.settings.userName ? 'obEmail' : 'obName').focus(), 60);
+    if (n === 3) setTimeout(() => $('obFinish').focus(), 60);
+  }
+
+  function openWelcome() {
+    const s = S.settings;
+    $('obName').value = s.userName || '';
+    $('obEmail').value = s.userEmail || '';
+    $('obAgree').checked = false;
+    formError('obError', '');
+    onboarding(true);
+    $('welcome').hidden = false;
+    showObPage(1);
+    setTimeout(() => $('obStart').focus(), 60);
+  }
+
+  $('obStart').onclick = () => showObPage(2);
+  $('obAgree').addEventListener('change', () => {
+    if ($('obAgree').checked) { $('obAgreeLine').classList.remove('bad'); formError('obError', ''); }
+  });
+  $('obBack').onclick = () => showObPage(1);
+  $('obForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('obName').value.trim().replace(/\s+/g, ' ');
+    const email = $('obEmail').value.trim();
+    $('obName').classList.toggle('bad', name.length < 2);
+    $('obEmail').classList.toggle('bad', !EMAIL_RE.test(email));
+    $('obAgreeLine').classList.toggle('bad', !$('obAgree').checked);
+    if (name.length < 2) return formError('obError', 'Please enter your name.');
+    if (!EMAIL_RE.test(email)) return formError('obError', 'Please enter a valid email address.');
+    if (!$('obAgree').checked) return formError('obError', 'Please accept the Terms and Conditions, Privacy Policy and Disclaimer to continue.');
+    formError('obError', '');
+    const btn = $('obSubmit');
+    btn.disabled = true;
+    try {
+      S.settings = await api.Register(name, email);
+      renderProfile();
+      $('obDoneTitle').textContent = `You're all set, ${name.split(' ')[0]}`;
+      showObPage(3);
+    } catch (err) {
+      formError('obError', errText(err));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('obFinish').onclick = () => {
+    $('welcome').hidden = true;
+    onboarding(false);
+    linkInput.focus();
+    offerClipboard();
+  };
+
+  // Existing users accept changed terms once.
+  function openTermsUpdate() {
+    onboarding(true);
+    formError('termsError', '');
+    $('termsUpdate').hidden = false;
+    setTimeout(() => $('termsAccept').focus(), 60);
+  }
+  $('termsAccept').onclick = async () => {
+    const btn = $('termsAccept');
+    btn.disabled = true;
+    try {
+      S.settings = await api.AcceptTerms();
+      $('termsUpdate').hidden = true;
+      onboarding(false);
+      offerClipboard();
+    } catch (err) {
+      formError('termsError', errText(err));
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  $('termsQuit').onclick = () => window.runtime.Quit();
+
+  const setupNeeded = () => !$('welcome').hidden || !$('termsUpdate').hidden;
 
   // ---------------------------------------------------------------- contact support
   function openSupport() {
@@ -1359,10 +1431,13 @@
   // ---------------------------------------------------------------- start
   async function init() {
     hydrateIcons();
+    let termsVersion = '';
     try {
       S.settings = await api.GetSettings();
       const info = await api.AppInfo();
+      termsVersion = info.termsVersion || '';
       $('aboutVersion').textContent = `Version ${info.shortVersion} · ${info.language}`;
+      $('regVersion').textContent = `Version ${info.shortVersion}`;
     } catch (e) {
       S.settings = { downloadDir: '', speedLimitKB: 0, parallel: 3, theme: 'dark', docsFormat: 'office', retries: 3, recentLinks: [] };
     }
@@ -1371,7 +1446,8 @@
     setPhase('empty');
     api.GetUpdate().then(renderUpdate).catch(() => {});
     api.GetNotices().then(renderNotices).catch(() => {});
-    if (!S.settings.registeredAt) openRegistration(true);
+    if (!S.settings.registeredAt) openWelcome();
+    else if (termsVersion && S.settings.termsAccepted !== termsVersion) openTermsUpdate();
     else offerClipboard();
   }
   init();
