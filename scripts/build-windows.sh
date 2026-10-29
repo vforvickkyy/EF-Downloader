@@ -47,6 +47,12 @@ LDFLAGS+=" -X eastape/internal/cloud.AppKey=$EASTAPE_APP_KEY"
 [[ -n "$EASTAPE_UPDATE_KEY" ]] && LDFLAGS+=" -X eastape/internal/cloud.UpdateKey=$EASTAPE_UPDATE_KEY"
 wails build -platform windows/amd64 -trimpath -skipbindings -clean -ldflags "$LDFLAGS"
 
+# Sign the app itself before it goes into the installer (the installer and
+# uninstaller are signed by makensis, below).
+if [[ -n "${SIGN_CMD:-}" ]]; then
+  "$SIGN_CMD" "$PWD/build/bin/EastapeDownloader.exe"
+fi
+
 # The installer's "Terms and Conditions" page: the same documents the app
 # shows, as plain text.
 LICENSE_TXT="$PWD/build/windows/installer/license.txt"

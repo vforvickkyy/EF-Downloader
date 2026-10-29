@@ -65,7 +65,7 @@ GitHub Actions builds both files on every push (download them from the run's *Ar
 
 To ship an update to existing users, upload the new Setup in the dashboard (**Updates → New update**) and publish it.
 
-**Code signing:** set `SIGN_CMD` to a script that signs the file passed as its argument (for example with `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p ... %1`). The installer and uninstaller are then signed automatically.
+**Code signing:** set `SIGN_CMD` to a script that signs the file passed as its argument (for example `signtool sign /n "Eastape Tech" /fd SHA256 /tr <your CA's timestamp server> /td SHA256 %1`, with the certificate's token or cloud-signing app connected). The app, the installer and the uninstaller are then all signed.
 
 ## Project layout
 
