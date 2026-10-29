@@ -107,6 +107,8 @@ jobs:
           if-no-files-found: ignore
       - name: Import signing certificate
         if: env.MAC_CERT_P12 != ''
+        # Finds the "Developer ID Application" certificate in the .p12 and
+        # passes its name and Team ID on to the build.
         run: |
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           security create-keychain -p "" "$KEYCHAIN"
@@ -114,26 +116,39 @@ jobs:
           security unlock-keychain -p "" "$KEYCHAIN"
           echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          rm "$RUNNER_TEMP/cert.p12"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(Developer ID Application: .*\)"$/\1/p' | head -n 1)"
+          if [[ -z "$IDENTITY" ]]; then
+            echo "::error::No 'Developer ID Application' certificate with its private key in MAC_CERT_P12."
+            security find-identity -v "$KEYCHAIN"
+            exit 1
+          fi
+          echo "Signing as: $IDENTITY"
+          echo "MAC_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
       - name: Build app and disk image
         env:
           EASTAPE_RELAY_URL: ${{ secrets.EASTAPE_RELAY_URL }}
           EASTAPE_RELAY_TOKEN: ${{ secrets.EASTAPE_RELAY_TOKEN }}
           EASTAPE_APP_KEY: ${{ secrets.EASTAPE_APP_KEY }}
-          MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: ./scripts/build-macos.sh "${{ steps.ver.outputs.version }}"
       - name: Check the build
         run: |
           APP="build/bin/Eastape Downloader.app"
+          DMG="$(ls build/bin/EastapeDownloader-*-mac.dmg)"
           lipo -archs "$APP/Contents/MacOS/EastapeDownloader"
           plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|LSMinimumSystemVersion'
-          codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature|Authority' || true
-          hdiutil verify build/bin/EastapeDownloader-*-mac.dmg
+          codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature|Authority|TeamIdentifier|Runtime' || true
+          hdiutil verify "$DMG"
+          if [[ -n "${MAC_SIGN_IDENTITY:-}" ]]; then
+            # What Gatekeeper says about the downloaded disk image and the app.
+            spctl --assess --type open --context context:primary-signature -vv "$DMG"
+            spctl --assess --type execute -vv "$APP"
+            xcrun stapler validate "$DMG"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: EastapeDownloader-${{ steps.ver.outputs.version }}-mac

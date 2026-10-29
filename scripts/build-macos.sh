@@ -9,9 +9,11 @@
 #                       keychain. Without it the app is signed ad hoc, and
 #                       macOS asks people to approve it the first time they
 #                       open it (System Settings > Privacy & Security).
-#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD
+#   APPLE_ID, APPLE_APP_PASSWORD
 #                       with MAC_SIGN_IDENTITY: notarize the disk image with
 #                       Apple (APPLE_APP_PASSWORD is an app-specific password).
+#                       APPLE_TEAM_ID defaults to the one in the certificate
+#                       name.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ "$(uname)" != Darwin ]]; then
@@ -57,9 +59,24 @@ done
 
 if [[ -n "${MAC_SIGN_IDENTITY:-}" ]]; then
   codesign --force --timestamp --sign "$MAC_SIGN_IDENTITY" "$DMG"
-  if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]; then
-    xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+  # "Developer ID Application: Name (TEAMID)" carries the Team ID.
+  APPLE_TEAM_ID="${APPLE_TEAM_ID:-$(sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p' <<<"$MAC_SIGN_IDENTITY")}"
+  if [[ -n "${APPLE_ID:-}" && -n "$APPLE_TEAM_ID" && -n "${APPLE_APP_PASSWORD:-}" ]]; then
+    echo "Sending the disk image to Apple for notarization (usually a few minutes)..."
+    RESULT="$(xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+      --password "$APPLE_APP_PASSWORD" --wait --output-format json)" || true
+    echo "$RESULT"
+    STATUS="$(plutil -extract status raw -o - - <<<"$RESULT" 2>/dev/null || true)"
+    if [[ "$STATUS" != Accepted ]]; then
+      # Apple's log says exactly what it rejected.
+      ID="$(plutil -extract id raw -o - - <<<"$RESULT" 2>/dev/null || true)"
+      [[ -n "$ID" ]] && xcrun notarytool log "$ID" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+      echo "Notarization failed: ${STATUS:-no result}" >&2
+      exit 1
+    fi
     xcrun stapler staple "$DMG"
+  else
+    echo "Note: signed but not notarized (set APPLE_ID and APPLE_APP_PASSWORD to notarize)." >&2
   fi
 fi
 

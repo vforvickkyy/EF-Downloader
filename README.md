@@ -78,7 +78,7 @@ To ship an update to existing users, upload the new Setup (Windows) or disk imag
 
 **Code signing:** set `SIGN_CMD` to a script that signs the file passed as its argument (for example `signtool sign /n "Eastape Tech" /fd SHA256 /tr <your CA's timestamp server> /td SHA256 %1`, with the certificate's token or cloud-signing app connected). The app, the installer and the uninstaller are then all signed.
 
-**Mac signing and notarization** (needs an Apple Developer Program membership): set `MAC_SIGN_IDENTITY` to the "Developer ID Application: …" certificate name, and `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` (an app-specific password) to notarize. In GitHub Actions, add those as secrets plus `MAC_CERT_P12` (the certificate exported as .p12, base64-encoded) and `MAC_CERT_PASSWORD`.
+**Mac signing and notarization** (needs an Apple Developer Program membership): in GitHub Actions, add the secrets `MAC_CERT_P12` (the "Developer ID Application" certificate with its private key, exported as .p12 and base64-encoded), `MAC_CERT_PASSWORD` (the .p12's password), `APPLE_ID` (the developer account's Apple ID) and `APPLE_APP_PASSWORD` (an app-specific password for that Apple ID). The build finds the certificate name and Team ID itself, signs the app with the hardened runtime, notarizes the disk image with Apple and staples the ticket; the *Check the build* step shows what Gatekeeper says. On a Mac, `MAC_SIGN_IDENTITY`, `APPLE_ID` and `APPLE_APP_PASSWORD` do the same for `build-macos.sh`.
 
 ## Project layout
 
