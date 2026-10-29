@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Eastape Downloader · Version 1.3 · Effective 28 October 2026
+Eastape Downloader · Version 1.4 · Effective 29 October 2026
 
 This policy explains what information Eastape Downloader ("the Software") collects, why, and how it is handled. The Software is made by Eastape Tech ("we", "us"), who is responsible for this information.
 
@@ -17,10 +17,10 @@ This policy explains what information Eastape Downloader ("the Software") collec
 
 - a random installation ID created by the Software;
 - the Software version and, for updates, the previous version;
-- your Windows version (for example "Windows 11, build 22631");
+- your operating system and its version (for example "Windows 11, build 22631" or "macOS 15.1 (Apple silicon)");
 - the date and time.
 
-**2. Registration.** Before you can use the Software it asks for your name and email address and for your acceptance of the Terms and Conditions, this Privacy Policy and the Disclaimer. Your details are sent to us with the installation ID, the Software version and your Windows version. If you change them later in Settings, the change is sent to us too.
+**2. Registration.** Before you can use the Software it asks for your name and email address and for your acceptance of the Terms and Conditions, this Privacy Policy and the Disclaimer. Your details are sent to us with the installation ID, the Software version and your operating system version. If you change them later in Settings, the change is sent to us too.
 
 **3. Usage statistics.** The Software sends us the following, linked to its installation ID (and so to your registration):
 
@@ -35,7 +35,7 @@ Usage statistics never include the links you paste, file or folder names, file c
 
 **4. Support messages.** When you use Contact Support we receive your name, email address, the topic and your message. If you leave "Include technical details" ticked, we also receive:
 
-- the Software and Windows versions and the installation ID;
+- the Software and operating system versions and the installation ID;
 - your download settings (such as the speed limit and how many files download at once);
 - a summary of the current download (numbers of files done, failed and waiting);
 - whether a Google API key is set (never the key itself);
@@ -47,7 +47,7 @@ Usage statistics never include the links you paste, file or folder names, file c
 
 - We never see or keep the files you download or their contents.
 - We don't collect the links you paste, the names of files or folders, your download history or your browsing activity, except as part of technical details you choose to include in a support message.
-- We don't collect your computer's name, your Windows user name, contacts, location or advertising identifiers.
+- We don't collect your computer's name, your user name on the computer, contacts, location or advertising identifiers.
 - The Software contains no advertising and no third-party tracking or analytics.
 
 ## Why we use it

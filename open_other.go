@@ -1,19 +1,12 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package main
 
 import (
 	"os/exec"
 	"path/filepath"
-	"runtime"
 )
 
-func openPath(p string) {
-	cmd := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		cmd = "open"
-	}
-	_ = exec.Command(cmd, p).Start()
-}
+func openPath(p string) { _ = exec.Command("xdg-open", p).Start() }
 
 func revealPath(p string) { openPath(filepath.Dir(p)) }

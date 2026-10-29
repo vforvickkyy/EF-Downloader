@@ -55,6 +55,19 @@ def header(icon):
     return img.convert('RGB')
 
 
+def mac_icon(icon):
+    """The Mac icon: macOS draws app icons at 824 px inside a 1024 canvas, with
+    a soft shadow, so a full-size tile would look too big in the Dock."""
+    canvas = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))
+    body = icon.resize((824, 824), Image.LANCZOS)
+    alpha = body.getchannel('A').point(lambda a: a * 0.5)
+    shadow = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))
+    shadow.paste(Image.new('RGBA', body.size, (0, 0, 0, 255)), (100, 112), alpha)
+    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(14)))
+    canvas.alpha_composite(body, (100, 100))
+    return canvas
+
+
 def main():
     master_path = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'build' / 'appicon.png'
     icon = Image.open(master_path).convert('RGBA')
@@ -69,6 +82,7 @@ def main():
     sized(icon, 256).save(ROOT / 'web' / 'public' / 'logo.png', optimize=True)
     sized(icon, 64).save(ROOT / 'web' / 'public' / 'favicon.png', optimize=True)
     assets = ROOT / 'build' / 'windows' / 'installer' / 'assets'
+    mac_icon(icon).save(ROOT / 'build' / 'darwin' / 'icon.png', optimize=True)
     sidebar(icon).save(assets / 'sidebar.bmp')
     header(icon).save(assets / 'header.bmp')
     print('icons and installer artwork written')

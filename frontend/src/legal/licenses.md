@@ -1,15 +1,15 @@
 # Open-source licences
 
-Eastape Downloader · Version 1.3
+Eastape Downloader · Version 1.4
 
 Eastape Downloader is © 2026 Eastape Tech. All rights reserved. It is built with the open-source software below, used under the licence shown for each. We are grateful to their authors.
 
 ## Components
 
 - **Go** programming language and standard library: BSD 3-Clause, Copyright 2009 The Go Authors
-- **debounce** (github.com/bep/debounce): MIT
-- **go-ole** (github.com/go-ole/go-ole): MIT
-- **uuid** (github.com/google/uuid): BSD 3-Clause
+- **debounce** (github.com/bep/debounce) (Windows only): MIT
+- **go-ole** (github.com/go-ole/go-ole) (Windows only): MIT
+- **uuid** (github.com/google/uuid) (Windows only): BSD 3-Clause
 - **go-ansi-parser** (github.com/leaanthony/go-ansi-parser): MIT
 - **slicer** (github.com/leaanthony/slicer): MIT
 - **u** (github.com/leaanthony/u): MIT
@@ -18,15 +18,16 @@ Eastape Downloader is © 2026 Eastape Tech. All rights reserved. It is built wit
 - **uniseg** (github.com/rivo/uniseg): MIT
 - **lo** (github.com/samber/lo): MIT
 - **go-reflector** (github.com/tkrajina/go-reflector): Apache 2.0
-- **go-webview2** (github.com/wailsapp/go-webview2): MIT
+- **go-webview2** (github.com/wailsapp/go-webview2) (Windows only): MIT
 - **mimetype** (github.com/wailsapp/mimetype): MIT
 - **Wails** (github.com/wailsapp/wails/v2): MIT
 - **Go networking libraries** (golang.org/x/net): BSD 3-Clause
-- **Go system libraries** (golang.org/x/sys): BSD 3-Clause
+- **Go system libraries** (golang.org/x/sys) (Windows only): BSD 3-Clause
 - **Go text libraries** (golang.org/x/text): BSD 3-Clause
 - **Go rate limiting library** (golang.org/x/time): BSD 3-Clause
-- **Microsoft Edge WebView2 Runtime**: Microsoft Software License Terms. Provided by Microsoft as part of Windows, or installed by the Eastape Downloader installer when missing.
-- **NSIS** (Nullsoft Scriptable Install System), used to build the installer: zlib/libpng licence
+- **Microsoft Edge WebView2 Runtime** (Windows only): Microsoft Software License Terms. Provided by Microsoft as part of Windows, or installed by the Eastape Downloader installer when missing.
+- **NSIS** (Nullsoft Scriptable Install System), used to build the Windows installer: zlib/libpng licence
+- **WebKit** (Mac only): part of macOS, provided by Apple.
 
 ## Licence texts
 

@@ -10,6 +10,9 @@ import { VERSION_RE } from '../semver.js';
 const N = (v) => Number(v || 0);
 const MAX_SIZE = 300 * 1024 * 1024;
 const ALLOWED_HOSTS = [/\.public\.blob\.vercel-storage\.com$/, /^github\.com$/, /^objects\.githubusercontent\.com$/, /^release-assets\.githubusercontent\.com$/];
+// Update channels: Windows copies check "stable" (its name from before the Mac
+// version), Mac copies check "mac".
+const PLATFORMS = { stable: 'Windows', mac: 'Mac' };
 
 const out = (r, adoption) => ({
   id: N(r.id), version: r.version, channel: r.channel, url: r.file_url, fileName: r.file_name, size: N(r.size),
@@ -40,9 +43,10 @@ export async function uploadToken(request) {
     body,
     request,
     onBeforeGenerateToken: async (pathname) => {
-      if (!/^releases\/[\w.-]+\.exe$/.test(pathname)) throw new HttpError(400, 'Upload an .exe installer');
+      if (!/^releases\/[\w.-]+\.(exe|dmg|zip)$/i.test(pathname)) throw new HttpError(400, 'Upload an .exe (Windows) or .dmg (Mac) file');
       return {
-        allowedContentTypes: ['application/octet-stream', 'application/x-msdownload', 'application/vnd.microsoft.portable-executable', 'application/x-msdos-program'],
+        allowedContentTypes: ['application/octet-stream', 'application/x-msdownload', 'application/vnd.microsoft.portable-executable', 'application/x-msdos-program',
+          'application/x-apple-diskimage', 'application/zip', 'application/x-zip-compressed'],
         maximumSizeInBytes: MAX_SIZE,
         addRandomSuffix: true,
       };
@@ -51,21 +55,34 @@ export async function uploadToken(request) {
   return json(result);
 }
 
-/** Downloads the installer and returns its size and SHA-256. */
-async function fingerprint(url) {
+/**
+ * Downloads the installer and returns its size and SHA-256, after checking it
+ * is the right kind of file for the platform: a Windows program, or a Mac
+ * disk image (or zip).
+ */
+async function fingerprint(url, channel) {
   const res = await fetch(url, { redirect: 'follow' });
   if (!res.ok || !res.body) throw new HttpError(400, `Couldn't download the installer (HTTP ${res.status}).`);
   const hash = crypto.createHash('sha256');
   let size = 0;
-  let head = null;
+  let head = Buffer.alloc(0);
+  let tail = Buffer.alloc(0);
   for await (const chunk of res.body) {
     const buf = Buffer.from(chunk);
-    if (!head) head = buf.subarray(0, 2);
+    if (head.length < 4) head = Buffer.concat([head, buf]).subarray(0, 4);
+    tail = Buffer.concat([tail, buf]).subarray(-512);
     size += buf.length;
     if (size > MAX_SIZE) throw new HttpError(400, 'The installer is too large.');
     hash.update(buf);
   }
-  if (!head || head.toString('latin1') !== 'MZ') throw new HttpError(400, "That file isn't a Windows program (.exe).");
+  if (channel === 'mac') {
+    // A disk image ends with a 512-byte "koly" trailer; a zip starts with PK.
+    const dmg = tail.length === 512 && tail.subarray(0, 4).toString('latin1') === 'koly';
+    const zip = head.toString('latin1') === 'PK\x03\x04';
+    if (!dmg && !zip) throw new HttpError(400, "That file isn't a Mac disk image (.dmg).");
+  } else if (head.subarray(0, 2).toString('latin1') !== 'MZ') {
+    throw new HttpError(400, "That file isn't a Windows program (.exe).");
+  }
   return { size, sha256: hash.digest('hex') };
 }
 
@@ -88,12 +105,13 @@ export async function createRelease(request) {
   const minSupported = str(body.minSupported, 20);
   if (minSupported && !VERSION_RE.test(minSupported)) throw new HttpError(400, 'Minimum version must look like 1.1.0');
   const channel = str(body.channel, 20) || 'stable';
+  if (!PLATFORMS[channel]) throw new HttpError(400, 'Choose Windows or Mac.');
 
   const sql = db();
   const [dup] = await sql`select id from releases where channel = ${channel} and version = ${version}`;
-  if (dup) throw new HttpError(409, `Version ${version} already exists.`);
+  if (dup) throw new HttpError(409, `Version ${version} for ${PLATFORMS[channel]} already exists.`);
 
-  const { size, sha256 } = await fingerprint(url);
+  const { size, sha256 } = await fingerprint(url, channel);
   const signature = await signUpdate({ version, sha256, size, url });
   const [row] = await sql`
     insert into releases (version, channel, file_url, file_name, size, sha256, signature, notes, mandatory, min_supported, rollout)

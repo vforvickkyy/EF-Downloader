@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -106,6 +107,15 @@ var newHTTPClient = func(timeout time.Duration) *http.Client {
 
 // Configured reports whether this build can reach the service.
 func Configured() bool { return APIURL != "" && AppKey != "" }
+
+// Channel is the update channel this build checks: Windows copies keep the
+// original "stable" channel, Mac copies get their own releases.
+func Channel() string {
+	if runtime.GOOS == "darwin" {
+		return "mac"
+	}
+	return "stable"
+}
 
 // Track queues an event. Usage events are dropped while stats are off.
 func (c *Client) Track(typ string, props map[string]any) {
@@ -277,7 +287,7 @@ func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
 		return nil, ErrNotConfigured
 	}
 	id := c.ident()
-	q := url.Values{"installId": {id.InstallID}, "version": {id.Version}, "channel": {"stable"}}
+	q := url.Values{"installId": {id.InstallID}, "version": {id.Version}, "channel": {Channel()}}
 	resp, err := c.do(ctx, http.MethodGet, "/api/v1/check?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err

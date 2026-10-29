@@ -1300,6 +1300,7 @@
   // The app checks at start and every few hours (updates.go). An update is
   // offered with a pill in the top bar; a required one opens right away.
   const U = { info: null, toasted: '' };
+  let IS_MAC = false; // set from AppInfo at start
 
   function renderUpdate(info) {
     U.info = info;
@@ -1330,7 +1331,10 @@
     if (info.state === 'available' && info.mandatory && $('updateModal').hidden) openUpdate();
     if (info.state === 'available' && !info.mandatory && U.toasted !== info.version) {
       U.toasted = info.version;
-      toast('info', `Version ${info.version} is available`, 'Update in one click. Your downloads and settings stay as they are.', { label: 'See what\'s new', run: openUpdate }, 9000);
+      const how = info.canInstall
+        ? 'Update in one click. Your downloads and settings stay as they are.'
+        : 'Download it, then replace the old version. Your downloads and settings stay as they are.';
+      toast('info', `Version ${info.version} is available`, how, { label: 'See what\'s new', run: openUpdate }, 9000);
     }
   }
 
@@ -1351,7 +1355,8 @@
       await api.InstallUpdate();
       if (U.info && !U.info.canInstall) {
         $('updateModal').hidden = true;
-        toast('info', 'Downloading the new Setup', 'Run it when it finishes to update Eastape Downloader.');
+        if (IS_MAC) toast('info', 'Downloading the new version', 'Open it when it finishes and drag Eastape Downloader into Applications, replacing the old one.');
+        else toast('info', 'Downloading the new Setup', 'Run it when it finishes to update Eastape Downloader.');
       }
     } catch (e) {
       $('updError').hidden = false;
@@ -1436,6 +1441,8 @@
       S.settings = await api.GetSettings();
       const info = await api.AppInfo();
       termsVersion = info.termsVersion || '';
+      IS_MAC = info.platform === 'darwin';
+      document.documentElement.classList.toggle('mac', IS_MAC);
       $('aboutVersion').textContent = `Version ${info.shortVersion} · ${info.language}`;
       $('regVersion').textContent = `Version ${info.shortVersion}`;
     } catch (e) {

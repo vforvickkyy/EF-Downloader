@@ -696,10 +696,11 @@ async function releasesPage(main) {
       const how = h('details', { class: 'callout' },
         h('summary', { style: 'cursor:pointer' }, h('b', null, 'How updates work')),
         h('ol', { style: 'margin:10px 0 0;padding-left:18px;display:grid;gap:4px' },
-          h('li', null, 'Build the new Setup (EastapeDownloader-Setup-x.y.z.exe) and upload it here as a draft.'),
+          h('li', null, 'Build the new version and upload it here as a draft: the Setup .exe for Windows, or the .dmg for Mac.'),
           h('li', null, 'The server signs it. The app only installs updates with a valid signature.'),
           h('li', null, 'Publish it. Start with a small rollout (e.g. 10%) and raise it once it looks good.'),
-          h('li', null, 'Pause it at any time to stop offering it.')),
+          h('li', null, 'Pause it at any time to stop offering it.'),
+          h('li', null, 'Windows users update in one click. Mac users get the new .dmg and replace the app themselves.')),
         h('div', { style: 'margin-top:10px' }, 'Update signing key (built into the app): ', h('span', { class: 'mono' }, d.publicKey || 'not set up')));
       list.replaceChildren(how, ...(d.rows.length ? d.rows.map(release) : [h('div', { class: 'card empty' }, 'No updates yet.')]));
     } catch (err) {
@@ -723,7 +724,8 @@ async function releasesPage(main) {
     return h('div', { class: 'item' },
       h('div', { class: 'item-head' },
         h('div', null,
-          h('div', { class: 'item-title' }, `Version ${r.version}`, h('span', { class: `badge ${badge[0]}` }, badge[1]),
+          h('div', { class: 'item-title' }, `Version ${r.version}`, h('span', { class: 'badge plain' }, r.channel === 'mac' ? 'Mac' : 'Windows'),
+            h('span', { class: `badge ${badge[0]}` }, badge[1]),
             r.mandatory ? h('span', { class: 'badge bad' }, 'Required') : null),
           h('div', { class: 'item-meta' },
             h('span', null, r.fileName), h('span', null, fmtBytes(r.size)),
@@ -774,7 +776,10 @@ function releaseFields(r = {}) {
 
 function newRelease(info, reload) {
   const version = h('input', { type: 'text', placeholder: '1.2.0', autocomplete: 'off' });
+  const platform = h('select', null, h('option', { value: 'stable' }, 'Windows (.exe)'), h('option', { value: 'mac' }, 'Mac (.dmg)'));
   const file = h('input', { type: 'file', accept: '.exe' });
+  const mac = () => platform.value === 'mac';
+  platform.addEventListener('change', () => { file.accept = mac() ? '.dmg,.zip' : '.exe'; file.value = ''; });
   const link = h('input', { type: 'url', placeholder: 'https://github.com/…/EastapeDownloader-Setup-1.2.0.exe' });
   const useLink = !info.blob;
   const bar = h('div', null);
@@ -790,8 +795,9 @@ function newRelease(info, reload) {
     wide: true,
     body: h('div', { class: 'form-grid' },
       h('div', { class: 'form-row' },
-        h('label', null, 'Version', version),
-        useLink ? h('label', null, 'Installer link (GitHub release)', link) : h('label', null, 'Installer (.exe)', file)),
+        h('label', null, 'Platform', platform),
+        h('label', null, 'Version', version)),
+      useLink ? h('label', null, 'Installer link (GitHub release)', link) : h('label', null, 'Installer file', file),
       useLink ? h('p', { class: 'hint', style: 'margin:0' }, 'File upload isn’t set up on this server yet, so use a GitHub release link.') : null,
       progress,
       fields.el,
@@ -811,8 +817,8 @@ function newRelease(info, reload) {
             let url = link.value.trim(), fileName;
             if (!useLink) {
               const f = file.files[0];
-              if (!f) throw new Error('Choose the Setup .exe file.');
-              if (!/\.exe$/i.test(f.name)) throw new Error('Choose an .exe file.');
+              if (!f) throw new Error(mac() ? 'Choose the .dmg file.' : 'Choose the Setup .exe file.');
+              if (mac() ? !/\.(dmg|zip)$/i.test(f.name) : !/\.exe$/i.test(f.name)) throw new Error(mac() ? 'Choose a .dmg file.' : 'Choose an .exe file.');
               progress.hidden = false;
               const { upload } = await import('/vendor/blob-client.js');
               const safe = f.name.replace(/[^\w.-]+/g, '-');
@@ -830,9 +836,9 @@ function newRelease(info, reload) {
               throw new Error('Paste the https:// link to the Setup file.');
             }
             btn.textContent = 'Checking and signing…';
-            await api('/api/admin/releases', { method: 'POST', body: { version: v, url, fileName, ...fields.values() } });
+            await api('/api/admin/releases', { method: 'POST', body: { version: v, channel: platform.value, url, fileName, ...fields.values() } });
             m.close();
-            toast(`Version ${v} saved as a draft. Publish it when you're ready.`);
+            toast(`Version ${v} for ${mac() ? 'Mac' : 'Windows'} saved as a draft. Publish it when you're ready.`);
             reload();
           } catch (e) {
             if (e.status !== 401) err.textContent = e.message || 'Upload failed. Try again.';

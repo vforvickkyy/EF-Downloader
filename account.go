@@ -245,7 +245,7 @@ func (a *App) diagnostics() string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "App: %s %s (%s)\n", appName, version, inst)
-	fmt.Fprintf(&b, "Windows: %s\n", feedback.OSVersion())
+	fmt.Fprintf(&b, "System: %s\n", feedback.OSVersion())
 	fmt.Fprintf(&b, "Install ID: %s\n", s.InstallID)
 	fmt.Fprintf(&b, "Google API key: %v\n", s.APIKey != "")
 	fmt.Fprintf(&b, "Settings: %d at once, limit %s, docs as %s, re-download existing %v, retries %d\n", s.Parallel, limit, s.DocsFormat, s.Overwrite, s.Retries)

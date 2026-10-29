@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,7 +35,8 @@ var version = "1.3.0"
 
 // termsVersion names the current Terms and Conditions, Privacy Policy and
 // Disclaimer. Users accept it when they register; when it changes, everyone
-// is asked to accept the new version before continuing.
+// is asked to accept the new version before continuing. (Version 1.4 of the
+// documents only added the Mac wording, so earlier acceptances still count.)
 const termsVersion = "2026-10-28"
 
 // App is the bridge between the window (frontend) and the download engine.
@@ -556,6 +558,7 @@ func (a *App) AppInfo() map[string]string {
 		"language":     "English",
 		"edition":      "Personal use",
 		"os":           feedback.OSVersion(),
+		"platform":     goruntime.GOOS,
 		"cloud":        fmt.Sprint(cloud.Configured()),
 		"termsVersion": termsVersion,
 	}

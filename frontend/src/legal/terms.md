@@ -1,6 +1,6 @@
 # Terms and Conditions
 
-Eastape Downloader · Version 1.3 · Effective 28 October 2026
+Eastape Downloader · Version 1.4 · Effective 29 October 2026
 
 These Terms and Conditions ("Terms") are an agreement between you and Eastape Tech ("we", "us"), the maker of Eastape Downloader ("the Software"). By installing, registering or using the Software you agree to these Terms, our Privacy Policy and our Disclaimer. If you do not agree, do not install or use the Software.
 
@@ -8,7 +8,7 @@ These Terms and Conditions ("Terms") are an agreement between you and Eastape Te
 
 We grant you a free, limited, personal, non-exclusive, non-transferable and revocable licence to install and use the Software on devices you own or control, **for personal, non-commercial use only**.
 
-You may share the unmodified official installer with other people for their own personal use. Each person who installs it must accept these Terms.
+You may share the unmodified official installer (for Windows) or disk image (for Mac) with other people for their own personal use. Each person who installs it must accept these Terms.
 
 ## 2. Restrictions
 

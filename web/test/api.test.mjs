@@ -297,6 +297,41 @@ test('releases are fingerprinted, signed and offered after publishing', { skip }
   }
 });
 
+test('Mac updates use their own channel and a disk image', { skip }, async () => {
+  const dmg = Buffer.concat([crypto.randomBytes(6000), Buffer.from('koly'), Buffer.alloc(508)]);
+  const exe = Buffer.concat([Buffer.from('MZ'), crypto.randomBytes(3000)]);
+  const dmgUrl = 'https://abc.public.blob.vercel-storage.com/releases/EastapeDownloader-1.5.0-x1.dmg';
+  const exeUrl = 'https://abc.public.blob.vercel-storage.com/releases/EastapeDownloader-Setup-1.5.0-x1.exe';
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => (String(u) === dmgUrl ? new Response(dmg) : String(u) === exeUrl ? new Response(exe) : new Response('no', { status: 404 }));
+  try {
+    // Each platform only takes its own kind of file.
+    assert.equal((await owner.send('POST', '/api/admin/releases', { version: '1.5.0', channel: 'mac', url: exeUrl })).status, 400);
+    assert.equal((await owner.send('POST', '/api/admin/releases', { version: '1.5.0', url: dmgUrl })).status, 400);
+    assert.equal((await owner.send('POST', '/api/admin/releases', { version: '1.5.0', channel: 'linux', url: dmgUrl })).status, 400);
+
+    const r = await owner.send('POST', '/api/admin/releases', { version: '1.5.0', channel: 'mac', url: dmgUrl, rollout: 100 });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.row.channel, 'mac');
+    await owner.send('PATCH', `/api/admin/releases/${r.data.row.id}`, { status: 'published' });
+
+    // Offered to Mac copies only.
+    const macOffer = (await app('GET', `/api/v1/check?installId=${ID}&version=1.4.0&channel=mac`)).data.update;
+    assert.equal(macOffer.version, '1.5.0');
+    assert.equal(macOffer.url, dmgUrl);
+    const winOffer = (await app('GET', `/api/v1/check?installId=${ID}&version=1.4.0&channel=stable`)).data.update;
+    assert.ok(!winOffer || winOffer.url !== dmgUrl);
+
+    // The same version can also exist for Windows.
+    const w = await owner.send('POST', '/api/admin/releases', { version: '1.5.0', url: exeUrl });
+    assert.equal(w.status, 200, JSON.stringify(w.data));
+    await owner.send('PATCH', `/api/admin/releases/${r.data.row.id}`, { status: 'paused' });
+    await owner.send('DELETE', `/api/admin/releases/${w.data.row.id}`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('without RELEASE_SIGNING_KEY the service makes and keeps its own key', { skip }, async () => {
   const saved = process.env.RELEASE_SIGNING_KEY;
   delete process.env.RELEASE_SIGNING_KEY;

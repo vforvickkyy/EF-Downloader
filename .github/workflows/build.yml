@@ -67,3 +67,79 @@ jobs:
           files: |
             build/bin/EastapeDownloader-Setup-*.exe
             build/bin/EastapeDownloader.exe
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    env:
+      # Optional, for a Developer ID signed and notarized app (see scripts/build-macos.sh).
+      MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+      MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+      - name: Test on macOS
+        run: go test . ./internal/...
+      - name: Version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="$(sed -n 's/.*"productVersion": *"\([^"]*\)".*/\1/p' wails.json)"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Launch check
+        # A quick copy without the service key (so it isn't counted as a real
+        # install): it must start and keep running, and a screenshot is kept.
+        run: |
+          wails build -platform darwin/arm64 -trimpath -skipbindings -clean
+          open "build/bin/Eastape Downloader.app"
+          sleep 15
+          pgrep -x EastapeDownloader
+          screencapture -x "$RUNNER_TEMP/launch.png" || true
+          osascript -e 'quit app "Eastape Downloader"' || pkill -x EastapeDownloader || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: launch-screenshot
+          path: ${{ runner.temp }}/launch.png
+          if-no-files-found: ignore
+      - name: Import signing certificate
+        if: env.MAC_CERT_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Build app and disk image
+        env:
+          EASTAPE_RELAY_URL: ${{ secrets.EASTAPE_RELAY_URL }}
+          EASTAPE_RELAY_TOKEN: ${{ secrets.EASTAPE_RELAY_TOKEN }}
+          EASTAPE_APP_KEY: ${{ secrets.EASTAPE_APP_KEY }}
+          MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: ./scripts/build-macos.sh "${{ steps.ver.outputs.version }}"
+      - name: Check the build
+        run: |
+          APP="build/bin/Eastape Downloader.app"
+          lipo -archs "$APP/Contents/MacOS/EastapeDownloader"
+          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|LSMinimumSystemVersion'
+          codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature|Authority' || true
+          hdiutil verify build/bin/EastapeDownloader-*-mac.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EastapeDownloader-${{ steps.ver.outputs.version }}-mac
+          path: build/bin/EastapeDownloader-*-mac.dmg
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/bin/EastapeDownloader-*-mac.dmg

@@ -34,14 +34,24 @@ NAMES = {
 }
 
 
-def modules():
-    """Every module compiled into the Windows app (same tags as wails build)."""
-    env = dict(os.environ, GOTOOLCHAIN="local", GOOS="windows", GOARCH="amd64", CGO_ENABLED="0")
+def platform_modules(goos, goarch, cgo):
+    """Every module compiled into the app for one platform (same tags as wails build)."""
+    env = dict(os.environ, GOTOOLCHAIN="local", GOOS=goos, GOARCH=goarch, CGO_ENABLED=cgo)
     out = subprocess.check_output(
         ["go", "list", "-deps", "-tags", "desktop,production",
          "-f", "{{with .Module}}{{if not .Main}}{{.Path}}{{end}}{{end}}", "."],
         cwd=ROOT, env=env, text=True)
-    return sorted(set(out.split()))
+    return set(out.split())
+
+
+def modules():
+    """Modules in the Windows and Mac apps, with the platform for those only in one."""
+    win = platform_modules("windows", "amd64", "0")
+    mac = platform_modules("darwin", "arm64", "1")
+    where = {m: "" for m in win & mac}
+    where.update({m: " (Windows only)" for m in win - mac})
+    where.update({m: " (Mac only)" for m in mac - win})
+    return sorted(where.items())
 
 
 def licence_kind(text):
@@ -88,13 +98,14 @@ def main():
         "- **Go** programming language and standard library: BSD 3-Clause, Copyright 2009 The Go Authors",
     ]
     texts = []
-    for mod in modules():
+    for mod, where in modules():
         text = licence_text(module_dir(mod))
         name = NAMES.get(mod, mod)
-        out.append(f"- **{name}** ({mod}): {licence_kind(text)}")
+        out.append(f"- **{name}** ({mod}){where}: {licence_kind(text)}")
         texts += [f"### {name} ({mod})", "", "```", text, "```", ""]
-    out.append("- **Microsoft Edge WebView2 Runtime**: Microsoft Software License Terms. Provided by Microsoft as part of Windows, or installed by the Eastape Downloader installer when missing.")
-    out.append("- **NSIS** (Nullsoft Scriptable Install System), used to build the installer: zlib/libpng licence")
+    out.append("- **Microsoft Edge WebView2 Runtime** (Windows only): Microsoft Software License Terms. Provided by Microsoft as part of Windows, or installed by the Eastape Downloader installer when missing.")
+    out.append("- **NSIS** (Nullsoft Scriptable Install System), used to build the Windows installer: zlib/libpng licence")
+    out.append("- **WebKit** (Mac only): part of macOS, provided by Apple.")
     out += ["", "## Licence texts", ""]
     out += ["### Go", "", "```", go_root_licence(), "```", ""]
     out += texts

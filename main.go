@@ -8,6 +8,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
@@ -24,13 +25,14 @@ func main() {
 
 	app := NewApp()
 
-	theme := windows.Dark
+	theme, appearance := windows.Dark, mac.NSAppearanceNameDarkAqua
 	switch app.settings.Theme {
 	case "light":
-		theme = windows.Light
+		theme, appearance = windows.Light, mac.NSAppearanceNameAqua
 	case "system":
-		theme = windows.SystemDefault
+		theme, appearance = windows.SystemDefault, mac.DefaultAppearance
 	}
+	icon, _ := assets.ReadFile("frontend/src/assets/logo.png")
 	webviewData := ""
 	if dir, err := os.UserConfigDir(); err == nil {
 		webviewData = filepath.Join(dir, "EastapeDownloader", "webview")
@@ -53,6 +55,17 @@ func main() {
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               "eastape-downloader-5f3c9a1e",
 			OnSecondInstanceLaunch: app.onSecondInstance,
+		},
+		// On the Mac, Wails adds the standard app, Edit and Window menus, so
+		// copy, paste and quit work with the usual shortcuts.
+		Mac: &mac.Options{
+			TitleBar:   mac.TitleBarDefault(),
+			Appearance: appearance,
+			About: &mac.AboutInfo{
+				Title:   appName + " " + version,
+				Message: slogan + "\n\n" + copyright,
+				Icon:    icon,
+			},
 		},
 		Windows: &windows.Options{
 			Theme:               theme,
