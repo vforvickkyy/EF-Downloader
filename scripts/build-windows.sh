@@ -30,8 +30,15 @@ done > "$LICENSE_TXT"
 WAILS_DIR="$(go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v2)"
 BOOTSTRAPPER="$WAILS_DIR/internal/webview2runtime/MicrosoftEdgeWebview2Setup.exe"
 
-NSIS_ARGS=(-V2 "-DVERSION=$VERSION" "-DAPP_EXE_SRC=$PWD/build/bin/EastapeDownloader.exe"
-  "-DWEBVIEW2_BOOTSTRAPPER=$BOOTSTRAPPER" "-DOUT_DIR=$PWD/build/bin" "-DLICENSE_FILE=$LICENSE_TXT")
+# On Windows, makensis needs plain Windows paths: Git Bash gives /d/... paths,
+# and the Go module path would end up with mixed slashes.
+nsis_path() {
+  if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '%s' "$1"; fi
+}
+
+NSIS_ARGS=(-V2 "-DVERSION=$VERSION" "-DAPP_EXE_SRC=$(nsis_path "$PWD/build/bin/EastapeDownloader.exe")"
+  "-DWEBVIEW2_BOOTSTRAPPER=$(nsis_path "$BOOTSTRAPPER")" "-DOUT_DIR=$(nsis_path "$PWD/build/bin")"
+  "-DLICENSE_FILE=$(nsis_path "$LICENSE_TXT")")
 if [[ -n "${SIGN_CMD:-}" ]]; then
   NSIS_ARGS+=("-DSIGN_CMD=$SIGN_CMD")
 fi
