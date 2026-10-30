@@ -4,8 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="dark light">
   <title>Eastape Downloader · Admin</title>
   <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/app.js"></script>
 </head>
@@ -21,23 +23,33 @@
       <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label>
       <p id="loginError" class="form-error" role="alert"></p>
       <button class="btn primary wide" type="submit">Sign in</button>
-      <p class="fine">Eastape Tech · Made by Creators, for Creators</p>
+      <p class="fine">Eastape Films · Made by Creators, for Creators</p>
     </form>
   </section>
 
   <div id="shell" class="shell" hidden>
-    <aside class="side">
+    <aside class="side" id="side">
       <a class="brand" href="#overview">
         <img src="/logo.png" alt="" width="34" height="34">
         <span><b>Eastape</b> Downloader<small>Admin</small></span>
       </a>
       <nav id="nav" class="nav" aria-label="Sections"></nav>
       <div class="me">
+        <span class="avatar" id="meAvatar" aria-hidden="true"></span>
         <div class="me-who"><b id="meName"></b><span id="meEmail"></span></div>
-        <button id="meMenu" class="icon-btn" type="button" aria-label="Account"></button>
+        <button id="meMenu" class="icon-btn" type="button" aria-label="Account and theme"></button>
       </div>
     </aside>
-    <main id="main" class="main" tabindex="-1"></main>
+    <div class="content">
+      <header class="topbar">
+        <button id="menuBtn" class="icon-btn" type="button" aria-label="Open menu"></button>
+        <div class="crumb" id="crumb"></div>
+        <div class="spacer"></div>
+        <span class="updated" id="updated" aria-live="polite"></span>
+        <button id="refreshBtn" class="btn small" type="button" title="Refresh (R)"><span id="refreshIcon"></span><span class="hide-xs">Refresh</span></button>
+      </header>
+      <main id="main" class="main" tabindex="-1"></main>
+    </div>
   </div>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>

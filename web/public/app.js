@@ -2,7 +2,7 @@
 // Everything that comes from the API is inserted as text, never as HTML.
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-const state = { user: null, days: 30, cleanup: null, openTickets: 0 };
+const state = { user: null, days: 30, cleanup: null, refresh: null, openTickets: 0, updatedAt: 0 };
 
 // ---------------------------------------------------------------- tiny DOM helpers
 
@@ -39,7 +39,8 @@ function s(tag, attrs, ...kids) {
 }
 
 const ICONS = {
-  overview: 'M22 12h-4l-3 9L9 3l-3 9H2',
+  overview: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
+  activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
   users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
   support: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   releases: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12',
@@ -65,6 +66,20 @@ const ICONS = {
   link: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
   power: 'M18.36 6.64a9 9 0 1 1-12.73 0 M12 2v10',
   user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8',
+  menu: 'M3 6h18 M3 12h18 M3 18h18',
+  sun: 'M12 7a5 5 0 1 1 0 10a5 5 0 1 1 0-10 M12 1v2 M12 21v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M1 12h2 M21 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42',
+  moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
+  monitor: 'M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M8 21h8 M12 17v4',
+  laptop: 'M5 4h14a1 1 0 0 1 1 1v10H4V5a1 1 0 0 1 1-1z M2 19h20l-2-4H4z',
+  chevronDown: 'M6 9l6 6 6-6',
+  chevronUp: 'M18 15l-6-6-6 6',
+  arrowUp: 'M12 19V5 M5 12l7-7 7 7',
+  arrowDown: 'M12 5v14 M19 12l-7 7-7-7',
+  arrowRight: 'M5 12h14 M12 5l7 7-7 7',
+  clock: 'M12 2a10 10 0 1 1 0 20a10 10 0 1 1 0-20 M12 6v6l4 2',
+  file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6',
+  sliders: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6',
+  keyboard: 'M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z M6 9h.01 M10 9h.01 M14 9h.01 M18 9h.01 M6 13h.01 M18 13h.01 M10 13h4 M7 16h10',
 };
 
 function icon(name) {
@@ -199,7 +214,11 @@ function confirmBox(title, text, label, kind = 'primary') {
 function menu(anchor, items) {
   document.querySelector('.menu')?.remove();
   const el = h('div', { class: 'menu', role: 'menu' },
-    items.map((it) => h('button', { type: 'button', role: 'menuitem', onclick: () => { el.remove(); it.run(); } }, icon(it.icon), it.label)));
+    items.map((it) => (it.sep ? h('hr') : it.heading ? h('div', { class: 'menu-label' }, it.heading)
+      : h('button', { type: 'button', role: it.checked === undefined ? 'menuitem' : 'menuitemradio', 'aria-checked': it.checked === undefined ? null : String(it.checked), onclick: () => { el.remove(); it.run(); } },
+        icon(it.icon), it.label, it.checked ? h('span', { class: 'tick' }, icon('check')) : null))));
+  const onKey = (e) => { if (e.key === 'Escape') { el.remove(); document.removeEventListener('keydown', onKey); anchor.focus(); } };
+  document.addEventListener('keydown', onKey);
   document.body.append(el);
   const r = anchor.getBoundingClientRect();
   const w = el.offsetWidth, ht = el.offsetHeight;
@@ -381,59 +400,281 @@ function barList(title, rows, format = fmtNum, empty = 'Nothing yet') {
 const tileEl = (label, value, note, hero = false) =>
   h('div', { class: `tile${hero ? ' hero' : ''}` }, h('div', { class: 'label' }, label), h('div', { class: 'value', title: String(value) }, value), note ? h('div', { class: 'note' }, note) : null);
 
-// ---------------------------------------------------------------- activity feed
+// ---------------------------------------------------------------- figures (KPI tiles)
+
+/** Change against the previous period: colour = direction × whether up is good, with an arrow and a sign. */
+function deltaEl(cur, prev, { upIsGood = true, format = fmtNum } = {}) {
+  const was = `Previous period: ${format(prev)}`;
+  if (!prev && !cur) return h('span', { class: 'delta', title: 'Nothing in either period' }, '—');
+  if (!prev) return h('span', { class: 'delta', title: was }, 'New');
+  const pct = ((cur - prev) / prev) * 100;
+  if (Math.abs(pct) < 0.5) return h('span', { class: 'delta', title: was }, '0%');
+  const up = pct > 0;
+  const shown = Math.abs(pct) >= 1000 ? `${fmtNum(Math.round(Math.abs(pct) / 100) / 10)}k` : fmtNum(Math.round(Math.abs(pct)));
+  return h('span', { class: `delta ${up === upIsGood ? 'good' : 'bad'}`, title: was },
+    icon(up ? 'arrowUp' : 'arrowDown'), `${up ? '+' : '−'}${shown}%`,
+    h('span', { class: 'sr-only' }, up ? ' up from the previous period' : ' down from the previous period'));
+}
+
+/** A small trend line: the period in a quiet grey, today marked in the series colour. */
+function sparkline(values, label) {
+  const w = 200, ht = 34, n = values.length;
+  const max = Math.max(...values, 0);
+  const svg = s('svg', { class: 'spark', viewBox: `0 0 ${w} ${ht}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': label });
+  if (n < 2 || max <= 0) return svg;
+  const x = (i) => (i / (n - 1)) * w;
+  const y = (v) => ht - 3 - (v / max) * (ht - 6);
+  const line = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  svg.append(s('path', { class: 's-area', d: `${line}L${w},${ht}L0,${ht}Z` }), s('path', { class: 's-line', d: line, 'vector-effect': 'non-scaling-stroke' }));
+  svg.append(s('circle', { class: 's-dot', cx: x(n - 1), cy: y(values[n - 1]), r: 3.2, 'vector-effect': 'non-scaling-stroke' }));
+  return svg;
+}
+
+function kpi({ label, ic, value, cmp, format = fmtNum, note, spark, upIsGood = true }) {
+  return h('div', { class: 'kpi' },
+    h('div', { class: 'label' }, icon(ic), label),
+    h('div', { class: 'row' }, h('div', { class: 'value', title: String(value) }, value), cmp ? deltaEl(cmp.current, cmp.previous, { upIsGood, format }) : null),
+    note ? h('div', { class: 'note' }, note) : null,
+    spark ? sparkline(spark, `${label} per day`) : null);
+}
+
+const skeletons = (n, cls) => Array.from({ length: n }, () => h('div', { class: `skel ${cls}` }));
+
+// ---------------------------------------------------------------- activity
+
+const ACTIVITY_TYPES = [
+  ['all', 'Everything'], ['installs', 'Installs'], ['registrations', 'Sign-ups'], ['links', 'Links'], ['downloads', 'Downloads'],
+  ['problems', 'Problems'], ['support', 'Support'], ['updates', 'Updates'], ['sessions', 'App opens'],
+  ['announcements', 'Announcements'], ['settings', 'Settings'],
+];
 
 const FEATURE_NAMES = {
   speed_limit: 'speed limit', parallel: 'parallel downloads', api_key: 'API key', retry_failed: 'retry failed',
   open_folder: 'open folder', reveal_file: 'show file', pause: 'pause', resume: 'resume', stop: 'stop', theme: 'theme', paste: 'paste link',
+  check_updates: 'check for updates',
 };
 
+/** [icon, sentence, tone] for one event. */
 function describe(ev) {
   const p = ev.props || {};
   const v = p.version || ev.version;
   switch (ev.type) {
-    case 'install': return ['download', `installed Eastape Downloader${ev.version ? ` ${ev.version}` : ''}`];
+    case 'install': return ['download', `installed Eastape Downloader${ev.version ? ` ${ev.version}` : ''}`, 'good'];
     case 'reinstall': return ['download', `reinstalled${ev.version ? ` ${ev.version}` : ''}`];
-    case 'update': return ['refresh', `updated${p.prevVersion ? ` from ${p.prevVersion}` : ''}${ev.version ? ` to ${ev.version}` : ''}`];
-    case 'first_run': return ['power', 'opened the app for the first time'];
-    case 'register': return ['user', p.updated ? 'updated their profile' : 'registered'];
-    case 'support': return ['support', `sent a support message${p.topic ? ` (${p.topic})` : ''}`];
+    case 'update': return ['refresh', `updated${p.prevVersion ? ` from ${p.prevVersion}` : ''}${ev.version ? ` to ${ev.version}` : ''}`, 'good'];
+    case 'first_run': return ['power', 'opened the app for the first time', 'good'];
+    case 'register': return ['user', p.updated ? 'updated their profile' : 'signed up', 'good'];
+    case 'support': return ['support', `sent a support message${p.topic ? ` (${p.topic})` : ''}`, 'info'];
     case 'session_start': return ['power', 'opened the app'];
     case 'session_end': return ['power', `closed the app after ${fmtDuration(p.durationSec)}`];
     case 'scan': return p.ok
       ? ['link', `added ${p.kind === 'file' ? 'a file link' : p.links > 1 ? `${p.links} links` : 'a folder link'}${p.files ? ` · ${plural(p.files, 'file')}` : ''}${p.bytes ? `, ${fmtBytes(p.bytes)}` : ''}`]
-      : ['alert', `couldn't open a link${p.errorKind ? ` (${p.errorKind})` : ''}`];
+      : ['alert', `couldn't open a link${p.errorKind ? ` (${String(p.errorKind).replace(/_/g, ' ')})` : ''}`, 'bad'];
     case 'job': {
       const what = `${plural(p.filesDone || 0, 'file')}, ${fmtBytes(p.bytes)}`;
       const how = p.result === 'stopped' ? 'stopped a download after' : p.result === 'failed' ? 'had a download fail after' : 'downloaded';
-      return [p.result === 'failed' ? 'alert' : 'download', `${how} ${what}${p.durationSec ? ` in ${fmtDuration(p.durationSec)}` : ''}${p.filesFailed ? ` · ${p.filesFailed} failed` : ''}`];
+      return [p.result === 'failed' ? 'alert' : 'download', `${how} ${what}${p.durationSec ? ` in ${fmtDuration(p.durationSec)}` : ''}${p.filesFailed ? ` · ${p.filesFailed} failed` : ''}`, p.result === 'failed' ? 'bad' : null];
     }
-    case 'feature': return ['overview', `used ${FEATURE_NAMES[p.name] || p.name || 'a feature'}`];
+    case 'feature': return ['sliders', `used ${FEATURE_NAMES[p.name] || String(p.name || 'a feature').replace(/_/g, ' ')}`];
     case 'setting': return ['edit', `changed ${String(p.name || 'a setting').replace(/_/g, ' ')}`];
-    case 'error': return ['alert', `hit a problem: ${String(p.kind || 'other').replace(/_/g, ' ')}`];
+    case 'error': return ['alert', `hit a problem: ${String(p.kind || 'other').replace(/_/g, ' ')}`, 'bad'];
     case 'update_offered': return ['releases', `was offered update ${v || ''}`];
     case 'update_started': return ['releases', `started updating to ${v || 'a new version'}`];
-    case 'update_installed': return ['ok', `installed update ${v || ''}`];
-    case 'update_failed': return ['alert', `couldn't install update ${v || ''}${p.error ? ` (${p.error})` : ''}`];
+    case 'update_installed': return ['ok', `installed update ${v || ''}`, 'good'];
+    case 'update_failed': return ['alert', `couldn't install update ${v || ''}${p.error ? ` (${p.error})` : ''}`, 'bad'];
     case 'announcement_seen': return ['announcements', 'saw an announcement'];
     case 'announcement_clicked': return ['announcements', 'opened an announcement link'];
     case 'announcement_dismissed': return ['announcements', 'dismissed an announcement'];
     case 'stats_enabled': return ['overview', 'turned usage stats on'];
     case 'stats_disabled': return ['overview', 'turned usage stats off'];
-    default: return ['more', ev.type];
+    default: return ['more', String(ev.type).replace(/_/g, ' ')];
   }
 }
 
-function feed(items) {
-  if (!items.length) return h('div', { class: 'empty' }, 'No activity yet. It shows up here as soon as the app is used.');
-  return h('div', { class: 'feed' }, items.map((ev) => {
-    const [ic, text] = describe(ev);
-    return h('div', { class: 'feed-item' },
-      h('span', { class: 'feed-icon' }, icon(ic)),
-      h('div', { class: 'feed-text' }, h('b', null, ev.name || `User ${ev.install}`), ' ', text,
-        h('div', { class: 'faint' }, ev.version ? `v${ev.version}` : '')),
-      h('span', { class: 'feed-time', title: fmtDate(ev.ts) }, timeAgo(ev.ts)));
-  }));
+const dayKey = (v) => { const d = new Date(v); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+function dayLabel(v) {
+  const d = new Date(v);
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (dayKey(d) === dayKey(today)) return 'Today';
+  if (dayKey(d) === dayKey(yesterday)) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
+const clock = (v) => new Date(v).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+function feedItem(ev, { showUser = true, fresh = false } = {}) {
+  const [ic, text, tone] = describe(ev);
+  const who = ev.name || `User ${ev.install}`;
+  return h('div', { class: `feed-item${fresh ? ' fresh' : ''}` },
+    h('span', { class: `feed-icon ${tone || ''}` }, icon(ic)),
+    h('div', { class: 'feed-text' },
+      showUser ? [h('button', { class: 'who-link', type: 'button', onclick: () => openUser(ev.installId) }, who), ' ', text]
+        : text.charAt(0).toUpperCase() + text.slice(1),
+      h('div', { class: 'feed-meta' },
+        h('span', { title: fmtDate(ev.ts) }, clock(ev.ts)),
+        ev.os ? h('span', null, ev.os) : null,
+        ev.version ? h('span', null, `v${ev.version}`) : null)),
+    h('span', { class: 'feed-time', title: fmtDate(ev.ts) }, timeAgo(ev.ts)));
+}
+
+/** Appends events to a feed, adding a heading whenever the day changes. */
+function appendFeed(feed, items, opts = {}) {
+  for (const ev of items) {
+    const k = dayKey(ev.ts);
+    if (feed.dataset.day !== k) {
+      feed.dataset.day = k;
+      feed.append(h('div', { class: 'feed-day' }, dayLabel(ev.ts)));
+    }
+    feed.append(feedItem(ev, opts));
+  }
+}
+
+/**
+ * An activity log that pages backwards ("Load more" / scrolling) and can fetch
+ * newer events. query() returns the filters ({ group, q, install }).
+ */
+function activityLog({ query, showUser = true, pageSize = 50, onNew, emptyText = 'No activity yet.' }) {
+  const feed = h('div', { class: 'feed' });
+  const status = h('span', null);
+  const moreBtn = h('button', { class: 'btn small', type: 'button', onclick: () => loadMore() }, 'Load more');
+  const foot = h('div', { class: 'feed-more' }, moreBtn, status);
+  const el = h('div', null, feed, foot);
+  let next = null, newest = null, count = 0, loading = false, seq = 0, pending = [];
+
+  const qs = (extra) => {
+    const p = new URLSearchParams({ limit: String(pageSize) });
+    for (const [k, v] of Object.entries({ ...query(), ...extra })) if (v && v !== 'all') p.set(k, v);
+    return p.toString();
+  };
+  const paintFoot = () => {
+    moreBtn.hidden = !next;
+    status.textContent = count ? `${next ? 'Showing' : 'All'} ${plural(count, 'event')}${next ? '' : ' · that’s everything'}` : '';
+  };
+
+  async function reload() {
+    const my = ++seq;
+    loading = true;
+    pending = [];
+    onNew?.(0);
+    if (!count) feed.replaceChildren(...skeletons(6, 'skel-row'));
+    else feed.classList.add('loading-dim');
+    try {
+      const d = await api(`/api/admin/activity?${qs()}`);
+      if (my !== seq) return;
+      feed.replaceChildren();
+      delete feed.dataset.day;
+      appendFeed(feed, d.items, { showUser });
+      next = d.next; newest = d.newest; count = d.items.length;
+      if (!count) feed.replaceChildren(h('div', { class: 'empty' }, icon('activity'), emptyText));
+      paintFoot();
+    } catch (err) {
+      if (err.status !== 401 && my === seq) feed.replaceChildren(h('div', { class: 'empty' }, err.message));
+    } finally {
+      if (my === seq) { loading = false; feed.classList.remove('loading-dim'); }
+    }
+  }
+
+  async function loadMore() {
+    if (!next || loading) return;
+    const my = seq;
+    loading = true;
+    moreBtn.disabled = true;
+    try {
+      const d = await api(`/api/admin/activity?${qs({ before: next })}`);
+      if (my !== seq) return;
+      appendFeed(feed, d.items, { showUser });
+      next = d.next; count += d.items.length;
+      paintFoot();
+    } catch (err) {
+      if (err.status !== 401) toast(err.message, 'bad');
+    } finally {
+      loading = false;
+      moreBtn.disabled = false;
+    }
+  }
+
+  /** Asks for events newer than the newest shown; they wait until showNew(). */
+  async function poll() {
+    if (loading || !newest) return;
+    const my = seq;
+    try {
+      const d = await api(`/api/admin/activity?${qs({ after: newest, limit: '100' })}`);
+      if (my !== seq || !d.items.length) return;
+      pending = [...d.items, ...pending];
+      newest = d.newest;
+      onNew?.(pending.length);
+    } catch { /* try again next time */ }
+  }
+
+  function showNew() {
+    if (!pending.length) return;
+    const items = pending;
+    pending = [];
+    onNew?.(0);
+    const top = h('div', null);
+    delete top.dataset.day;
+    appendFeed(top, items, { showUser, fresh: true });
+    // Drop the old first day heading if the new events continue that day.
+    const first = feed.firstElementChild;
+    if (first?.classList.contains('feed-day') && first.textContent === dayLabel(items[items.length - 1].ts)) first.remove();
+    if (feed.querySelector('.empty')) feed.replaceChildren();
+    feed.prepend(...top.children);
+    count += items.length;
+    paintFoot();
+  }
+
+  // Load the next page when the bottom comes into view.
+  const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); }, { rootMargin: '300px' });
+  io.observe(foot);
+  return { el, reload, poll, showNew, destroy: () => io.disconnect() };
+}
+
+// ---------------------------------------------------------------- routing and refresh
+
+/** "#users?sort=data" → { key: 'users', params } */
+function route() {
+  const [key, qs] = location.hash.slice(1).split('?');
+  return { key: PAGES[key] ? key : 'overview', params: new URLSearchParams(qs || '') };
+}
+
+/** Changes the page's query (filters, sort, open user) without reloading it. */
+function setParams(changes) {
+  const { key, params } = route();
+  for (const [k, v] of Object.entries(changes)) {
+    if (v === null || v === undefined || v === '' || v === false) params.delete(k);
+    else params.set(k, String(v));
+  }
+  const qs = params.toString();
+  history.replaceState(null, '', `#${key}${qs ? `?${qs}` : ''}`);
+}
+
+function markUpdated() {
+  state.updatedAt = Date.now();
+  paintUpdated();
+}
+
+function paintUpdated() {
+  $('#updated').textContent = state.updatedAt ? `Updated ${timeAgo(state.updatedAt)}` : '';
+}
+
+async function refreshNow() {
+  const btn = $('#refreshBtn');
+  if (!state.user || btn.classList.contains('spin')) return;
+  btn.classList.add('spin');
+  try {
+    if (state.refresh) await state.refresh();
+    else await render();
+    markUpdated();
+  } finally {
+    btn.classList.remove('spin');
+  }
+}
+
+function searchBox(placeholder, value, onInput) {
+  const input = h('input', { type: 'search', placeholder, 'aria-label': placeholder, value, dataset: { search: '1' } });
+  let timer = null;
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => onInput(input.value.trim()), 300); });
+  return h('label', { class: 'search grow' }, icon('search'), input, h('kbd', null, '/'));
 }
 
 // ---------------------------------------------------------------- pages
@@ -446,23 +687,40 @@ function pageHead(title, sub, ...right) {
 
 async function overviewPage(main) {
   const cleanups = [];
-  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Period' },
-    [7, 30, 90].map((d) => h('button', { type: 'button', 'aria-pressed': String(state.days === d), onclick: () => { state.days = d; render(); } }, `${d} days`)));
-  const liveTiles = h('div', { class: 'tiles live-tiles' });
-  const updated = h('span', { class: 'updated' }, '');
+  const { params } = route();
+  if ([7, 30, 90].includes(Number(params.get('days')))) state.days = Number(params.get('days'));
+  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Period' });
+  const paintSeg = () => seg.replaceChildren(...[7, 30, 90].map((d) => h('button', {
+    type: 'button', 'aria-pressed': String(state.days === d),
+    onclick: () => { state.days = d; setParams({ days: d === 30 ? null : d }); paintSeg(); loadAll(); },
+  }, `${d} days`)));
+  paintSeg();
+
+  const liveTiles = h('div', { class: 'tiles live-tiles' }, ...skeletons(6, 'skel-tile'));
   const dot = h('span', { class: 'dot' });
-  const activity = h('div', null);
-  const body = h('div', { class: 'stack' });
+  const periodTitle = h('div', { class: 'section-title' });
+  const kpis = h('div', { class: 'kpis' }, ...skeletons(8, 'skel-tile'));
+  const charts = h('div', { class: 'grid two' }, ...skeletons(4, 'skel-chart'));
+  const allTime = h('div', { class: 'tiles four' });
+  const breakdown = h('div', { class: 'grid two' });
+  const feed = h('div', { class: 'feed' }, ...skeletons(5, 'skel-row'));
+  const activityCard = h('div', { class: 'card flush' },
+    h('div', { class: 'card-head' }, h('h2', null, 'Recent activity'), h('a', { class: 'linkish', href: '#activity' }, 'View all', icon('arrowRight'))),
+    feed,
+    h('div', { class: 'card-foot' }, h('span', null, 'Updates every 15 seconds'), h('a', { class: 'linkish', href: '#activity' }, 'Open the activity log', icon('arrowRight'))));
+
   main.replaceChildren(
     pageHead('Overview', 'How Eastape Downloader is being used, live.', seg),
     h('div', { class: 'card live-card' },
-      h('div', { class: 'card-head' }, h('span', { class: 'live-badge' }, dot, 'Live now'), updated),
+      h('div', { class: 'card-head' }, h('span', { class: 'live-badge' }, dot, 'Live now'), h('span', { class: 'sub' }, 'Last 15 minutes')),
       liveTiles),
-    body,
-    h('div', { class: 'section-title' }, 'Recent activity'),
-    h('div', { class: 'card' }, activity));
+    periodTitle, kpis,
+    h('div', { class: 'section-title' }, 'Trends'), charts,
+    h('div', { class: 'section-title' }, 'All time'), allTime,
+    h('div', { class: 'grid side-by', style: 'margin-top:28px' },
+      h('div', null, h('div', { class: 'section-title', style: 'margin-top:0' }, 'Breakdown', h('span', { class: 'sub' }, 'people active in the last 30 days')), breakdown),
+      h('div', null, h('div', { class: 'section-title', style: 'margin-top:0' }, 'Activity'), activityCard)));
 
-  let lastLive = 0;
   const paintLive = (live, items) => {
     liveTiles.replaceChildren(
       tileEl('Using the app now', fmtNum(live.activeNow), 'seen in the last 15 minutes', true),
@@ -471,51 +729,64 @@ async function overviewPage(main) {
       tileEl('Downloaded today', fmtBytes(live.bytesToday)),
       tileEl('New installs today', fmtNum(live.installsToday)),
       tileEl('Open support messages', fmtNum(live.openTickets)));
-    activity.replaceChildren(feed(items));
-    lastLive = Date.now();
+    feed.replaceChildren();
+    delete feed.dataset.day;
+    if (items.length) appendFeed(feed, items);
+    else feed.append(h('div', { class: 'empty' }, icon('activity'), 'No activity yet. It shows up here as soon as the app is used.'));
     setCount(live.openTickets);
   };
 
+  let loadSeq = 0;
   const loadAll = async () => {
-    body.classList.add('loading-dim');
+    const my = ++loadSeq;
+    for (const el of [kpis, charts, allTime, breakdown]) el.classList.add('loading-dim');
     try {
       const d = await api(`/api/admin/overview?days=${state.days}&tz=${encodeURIComponent(TZ)}`);
+      if (my !== loadSeq) return;
       paintLive(d.live, d.activity);
       for (const c of cleanups.splice(0)) c();
-      const t = d.totals;
-      const series = d.series;
-      body.replaceChildren(
-        h('div', { class: 'section-title' }, 'All time'),
-        h('div', { class: 'tiles' },
-          tileEl('Installs', fmtNum(t.installs), `${fmtNum(t.users)} registered`),
-          tileEl('Active users', fmtNum(t.active7d), `${fmtNum(t.active1d)} today · ${fmtNum(t.active30d)} in 30 days`),
-          tileEl('Data downloaded', fmtBytes(t.bytes), `${fmtNum(t.files)} files`),
-          tileEl('Links added', fmtNum(t.links), t.scanSuccess === null ? 'no links yet' : `${Math.round(t.scanSuccess)}% opened fine`),
-          tileEl('Downloads run', fmtNum(t.jobs)),
-          tileEl('Time in the app', fmtDuration(t.seconds), `${fmtNum(t.sessions)} sessions`),
-          tileEl('Average session', fmtDuration(t.avgSession), 'last 30 days'),
-          tileEl('Average speed', t.avgSpeed ? fmtSpeed(t.avgSpeed) : '—', 'downloads over 1 MB, 30 days')),
-        h('div', { class: 'section-title' }, `Last ${d.days} days`),
-        h('div', { class: 'grid two' },
-          chartCard('Active users per day', (n) => `${fmtNum(Math.max(...series.map((r) => r.active)))} at most`, series,
-            { kind: 'area', integer: true, value: (r) => r.active, format: (v) => fmtNum(v) }, cleanups),
-          chartCard('Data downloaded per day', (n) => `${fmtBytes(n)} in total`, series,
-            { base: 1024, value: (r) => r.bytes, format: (v) => fmtBytes(v) }, cleanups),
-          chartCard('New installs per day', (n) => `${fmtNum(n)} in total · ${fmtNum(series.reduce((a, r) => a + r.users, 0))} registered`, series,
-            { integer: true, value: (r) => r.installs, format: (v) => fmtNum(v) }, cleanups),
-          chartCard('Time in the app per day', (n) => `${fmtDuration(n * 3600)} in total`, series,
-            { value: (r) => r.seconds / 3600, format: (v, tick) => (tick ? `${v < 10 ? Number(v.toFixed(1)) : fmtNum(v)}h` : fmtDuration(v * 3600)) }, cleanups)),
-        h('div', { class: 'section-title' }, 'Breakdown'),
-        h('div', { class: 'grid three' },
-          barList('App versions', d.versions),
-          barList('Windows versions', d.systems),
-          barList('Link types', d.linkKinds),
-          barList('Features used', d.features.map((f) => ({ ...f, name: FEATURE_NAMES[f.name] || f.name }))),
-          barList('Problems', d.errors.map((e) => ({ ...e, name: e.name.replace(/_/g, ' ') })), fmtNum, 'No problems reported')));
+      const t = d.totals, c = d.compare, series = d.series;
+      const col = (k) => series.map((r) => r[k]);
+      periodTitle.replaceChildren(`Last ${d.days} days`, h('span', { class: 'sub' }, `compared with the ${d.days} days before`));
+      kpis.replaceChildren(
+        kpi({ label: 'Active users', ic: 'users', value: fmtNum(c.activeUsers.current), cmp: c.activeUsers, note: 'used the app at least once', spark: col('active') }),
+        kpi({ label: 'New installs', ic: 'download', value: fmtNum(c.installs.current), cmp: c.installs, note: 'Windows and Mac', spark: col('installs') }),
+        kpi({ label: 'Sign-ups', ic: 'user', value: fmtNum(c.registrations.current), cmp: c.registrations, note: 'entered name and email', spark: col('users') }),
+        kpi({ label: 'Downloads', ic: 'check', value: fmtNum(c.downloads.current), cmp: c.downloads, note: 'downloads finished or stopped', spark: col('jobs') }),
+        kpi({ label: 'Files downloaded', ic: 'file', value: fmtNum(c.files.current), cmp: c.files, spark: col('files') }),
+        kpi({ label: 'Data downloaded', ic: 'releases', value: fmtBytes(c.bytes.current), cmp: c.bytes, format: fmtBytes, spark: col('bytes') }),
+        kpi({ label: 'Links added', ic: 'link', value: fmtNum(c.links.current), cmp: c.links, spark: col('scans') }),
+        kpi({ label: 'Time in the app', ic: 'clock', value: fmtDuration(c.seconds.current), cmp: c.seconds, format: fmtDuration, spark: col('seconds') }));
+      charts.replaceChildren(
+        chartCard('Active users per day', () => `${fmtNum(Math.max(0, ...col('active')))} on the busiest day`, series,
+          { kind: 'area', integer: true, value: (r) => r.active, format: (v) => fmtNum(v) }, cleanups),
+        chartCard('Data downloaded per day', (n) => `${fmtBytes(n)} in total`, series,
+          { base: 1024, value: (r) => r.bytes, format: (v) => fmtBytes(v) }, cleanups),
+        chartCard('New installs per day', (n) => `${fmtNum(n)} in total · ${fmtNum(series.reduce((a, r) => a + r.users, 0))} signed up`, series,
+          { integer: true, value: (r) => r.installs, format: (v) => fmtNum(v) }, cleanups),
+        chartCard('Time in the app per day', (n) => `${fmtDuration(n * 3600)} in total`, series,
+          { value: (r) => r.seconds / 3600, format: (v, tick) => (tick ? `${v < 10 ? Number(v.toFixed(1)) : fmtNum(v)}h` : fmtDuration(v * 3600)) }, cleanups));
+      allTime.replaceChildren(
+        tileEl('Installs', fmtNum(t.installs), `${fmtNum(t.users)} signed up`),
+        tileEl('Active users', fmtNum(t.active7d), `this week · ${fmtNum(t.active1d)} today · ${fmtNum(t.active30d)} this month`),
+        tileEl('Data downloaded', fmtBytes(t.bytes), `${fmtNum(t.files)} files`),
+        tileEl('Downloads', fmtNum(t.jobs)),
+        tileEl('Links added', fmtNum(t.links), t.scanSuccess === null ? 'no links yet' : `${Math.round(t.scanSuccess)}% opened fine (30 days)`),
+        tileEl('Time in the app', fmtDuration(t.seconds), `${fmtNum(t.sessions)} sessions`),
+        tileEl('Average session', fmtDuration(t.avgSession), 'last 30 days'),
+        tileEl('Average speed', t.avgSpeed ? fmtSpeed(t.avgSpeed) : '—', 'downloads over 1 MB, 30 days'));
+      breakdown.replaceChildren(
+        barList('Platforms', d.platforms),
+        barList('App versions', d.versions.map((v) => ({ ...v, name: v.name === 'unknown' ? v.name : `v${v.name}` }))),
+        barList('Operating systems', d.systems),
+        barList('Link types', d.linkKinds),
+        barList('Features used', d.features.map((f) => ({ ...f, name: FEATURE_NAMES[f.name] || f.name.replace(/_/g, ' ') }))),
+        barList('Problems', d.errors.map((e) => ({ ...e, name: e.name.replace(/_/g, ' ') })), fmtNum, 'No problems reported'));
+      markUpdated();
     } catch (err) {
-      if (err.status !== 401) body.replaceChildren(h('div', { class: 'card empty' }, err.message));
+      if (err.status !== 401 && my === loadSeq) kpis.replaceChildren(h('div', { class: 'card empty', style: 'grid-column:1/-1' }, err.message));
     } finally {
-      body.classList.remove('loading-dim');
+      if (my === loadSeq) for (const el of [kpis, charts, allTime, breakdown]) el.classList.remove('loading-dim');
     }
   };
 
@@ -524,6 +795,7 @@ async function overviewPage(main) {
       const d = await api(`/api/admin/live?tz=${encodeURIComponent(TZ)}`);
       paintLive(d.live, d.activity);
       dot.classList.remove('off');
+      markUpdated();
     } catch {
       dot.classList.add('off');
     }
@@ -532,91 +804,301 @@ async function overviewPage(main) {
   await loadAll();
   const liveTimer = setInterval(() => { if (!document.hidden) loadLive(); }, 15000);
   const fullTimer = setInterval(() => { if (!document.hidden) loadAll(); }, 5 * 60000);
-  const clock = setInterval(() => { updated.textContent = lastLive ? `Updated ${timeAgo(lastLive)} · refreshes every 15 s` : ''; }, 1000);
-  return () => { clearInterval(liveTimer); clearInterval(fullTimer); clearInterval(clock); for (const c of cleanups) c(); };
+  return {
+    refresh: loadAll,
+    cleanup: () => { clearInterval(liveTimer); clearInterval(fullTimer); for (const c of cleanups) c(); },
+  };
+}
+
+// ---- Activity
+
+async function activityPage(main) {
+  const { params } = route();
+  let group = ACTIVITY_TYPES.some(([k]) => k === params.get('type')) ? params.get('type') : 'all';
+  let q = params.get('q') || '';
+  const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Type of activity' });
+  const pill = h('button', { class: 'new-pill', type: 'button', hidden: true, onclick: () => { log.showNew(); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+  const log = activityLog({
+    query: () => ({ group, q }),
+    pageSize: 50,
+    emptyText: 'Nothing matches. Try another type or search.',
+    onNew: (n) => { pill.hidden = !n; pill.replaceChildren(icon('arrowUp'), `${plural(n, 'new event')} · show`); },
+  });
+  const paintChips = () => chips.replaceChildren(...ACTIVITY_TYPES.map(([k, label]) => h('button', {
+    class: 'chip', type: 'button', 'aria-pressed': String(group === k),
+    onclick: () => { group = k; setParams({ type: k === 'all' ? null : k }); paintChips(); log.reload(); },
+  }, label)));
+  paintChips();
+
+  main.replaceChildren(
+    pageHead('Activity', 'Everything people do in the app, newest first. Scroll or press Load more to go further back.'),
+    h('div', { class: 'toolbar', style: 'margin-bottom:12px' },
+      searchBox('Search by name, email or install ID', q, (v) => { q = v; setParams({ q: v || null }); log.reload(); })),
+    h('div', { style: 'margin-bottom:16px' }, chips),
+    pill,
+    h('div', { class: 'card flush' }, log.el));
+
+  await log.reload();
+  markUpdated();
+  const timer = setInterval(() => { if (!document.hidden) log.poll(); }, 15000);
+  return {
+    refresh: async () => { await log.reload(); },
+    cleanup: () => { clearInterval(timer); log.destroy(); },
+  };
 }
 
 // ---- Users
 
-async function usersPage(main) {
-  let page = 1, q = '', filter = 'all', timer = null;
-  const search = h('input', { type: 'search', placeholder: 'Search name, email or install ID', 'aria-label': 'Search users', class: 'grow' });
-  const filterSel = h('select', { 'aria-label': 'Filter', style: 'width:auto' },
-    h('option', { value: 'all' }, 'Everyone'),
-    h('option', { value: 'registered' }, 'Registered'),
-    h('option', { value: 'unregistered' }, 'Not registered'),
-    h('option', { value: 'active' }, 'Active this week'));
-  const exportBtn = h('a', { class: 'btn', href: '#', download: '' }, icon('download'), 'Export CSV');
-  const list = h('div', null);
-  const pager = h('div', { class: 'pager' });
-  main.replaceChildren(
-    pageHead('Users', 'Everyone who installed the app. Name and email appear once they register.'),
-    h('div', { class: 'card' }, h('div', { class: 'toolbar', style: 'margin-bottom:14px' }, search, filterSel, exportBtn), list, pager));
+const USER_SORTS = [
+  ['recent', 'Recently active'], ['newest', 'Newest installs'], ['oldest', 'Oldest installs'],
+  ['name', 'Name A–Z'], ['name_desc', 'Name Z–A'], ['data', 'Most data downloaded'],
+  ['downloads', 'Most downloads'], ['files', 'Most files'], ['time', 'Most time in the app'],
+];
+const USER_FILTERS = [
+  ['all', 'Everyone'], ['registered', 'Signed up'], ['unregistered', 'Not signed up'],
+  ['active', 'Active this week'], ['online', 'Online now'], ['downloading', 'Downloading now'],
+];
 
-  const status = (r) => {
-    const fresh = Date.now() - new Date(r.lastSeen).getTime() < 15 * 60000;
-    if (fresh && r.state === 'downloading') return h('span', { class: 'badge good' }, 'Downloading');
-    if (fresh) return h('span', { class: 'badge info' }, 'Online');
-    return h('span', { class: 'faint' }, timeAgo(r.lastSeen));
+const initials = (name, email) => {
+  const src = (name || '').trim() || (email || '').split('@')[0];
+  if (!src) return '?';
+  const parts = src.split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+};
+const avatar = (name, email, cls = '') => h('span', { class: `avatar ${name || email ? '' : 'anon'} ${cls}`, 'aria-hidden': 'true' }, initials(name, email));
+const platformEl = (r) => r.os
+  ? h('span', { class: 'plat' }, icon(r.platform === 'mac' ? 'laptop' : 'monitor'), r.os.split(' (')[0])
+  : h('span', { class: 'faint' }, '—');
+
+function userStatus(r) {
+  const fresh = Date.now() - new Date(r.lastSeen).getTime() < 15 * 60000;
+  if (fresh && r.state === 'downloading') return h('span', { class: 'badge good' }, 'Downloading');
+  if (fresh) return h('span', { class: 'badge info' }, 'Online');
+  return h('span', { class: 'faint', title: fmtDate(r.lastSeen) }, timeAgo(r.lastSeen));
+}
+
+async function usersPage(main) {
+  const { params } = route();
+  const pick = (key, list, fallback) => (list.some(([k]) => k === params.get(key)) ? params.get(key) : fallback);
+  const st = {
+    q: params.get('q') || '',
+    filter: pick('filter', USER_FILTERS, 'all'),
+    sort: pick('sort', USER_SORTS, 'recent'),
+    platform: ['windows', 'mac'].includes(params.get('platform')) ? params.get('platform') : '',
+    version: params.get('version') || '',
+    page: Math.max(1, Number(params.get('page')) || 1),
+    size: [25, 50, 100].includes(Number(params.get('size'))) ? Number(params.get('size')) : 50,
+  };
+  let facets = null, seq = 0;
+
+  const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Who to show' });
+  const platformSel = h('select', { 'aria-label': 'Platform' });
+  const versionSel = h('select', { 'aria-label': 'App version' });
+  const sortSel = h('select', { 'aria-label': 'Sort by' }, USER_SORTS.map(([k, label]) => h('option', { value: k, selected: st.sort === k }, `Sort: ${label}`)));
+  const clearBtn = h('button', { class: 'btn ghost', type: 'button', onclick: () => { Object.assign(st, { q: '', filter: 'all', platform: '', version: '', page: 1 }); search.querySelector('input').value = ''; changed(); } }, icon('x'), 'Clear filters');
+  const exportBtn = h('a', { class: 'btn', href: '#', download: '' }, icon('download'), 'Export CSV');
+  const table = h('div', { class: 'table-wrap' }, ...skeletons(8, 'skel-row'));
+  const pager = h('div', { class: 'pager' });
+  const search = searchBox('Search name, email or install ID', st.q, (v) => { st.q = v; st.page = 1; changed(); });
+
+  main.replaceChildren(
+    pageHead('Users', 'Everyone who installed the app. Name and email appear once they sign up.', exportBtn),
+    h('div', { style: 'margin-bottom:12px' }, chips),
+    h('div', { class: 'toolbar', style: 'margin-bottom:16px' }, search, platformSel, versionSel, sortSel, clearBtn),
+    h('div', { class: 'card flush' }, table, pager));
+
+  const paintControls = () => {
+    const f = facets || {};
+    chips.replaceChildren(...USER_FILTERS.map(([k, label]) => h('button', {
+      class: 'chip', type: 'button', 'aria-pressed': String(st.filter === k),
+      onclick: () => { st.filter = k; st.page = 1; changed(); },
+    }, k === 'online' || k === 'downloading' ? h('span', { class: 'dot', style: k === 'online' ? '' : 'background:var(--good)' }) : null,
+    label, facets ? h('span', { class: 'n' }, fmtNum(k === 'all' ? f.all : f[k])) : null)));
+    platformSel.replaceChildren(
+      h('option', { value: '' }, 'All platforms'),
+      h('option', { value: 'windows', selected: st.platform === 'windows' }, `Windows${facets ? ` · ${fmtNum(f.windows)}` : ''}`),
+      h('option', { value: 'mac', selected: st.platform === 'mac' }, `macOS${facets ? ` · ${fmtNum(f.mac)}` : ''}`));
+    const versions = facets?.versions || [];
+    if (st.version && !versions.some((v) => v.name === st.version)) versions.unshift({ name: st.version, n: 0 });
+    versionSel.replaceChildren(h('option', { value: '' }, 'All versions'),
+      ...versions.map((v) => h('option', { value: v.name, selected: st.version === v.name }, `v${v.name} · ${fmtNum(v.n)}`)));
+    sortSel.value = st.sort;
+    clearBtn.hidden = !(st.q || st.filter !== 'all' || st.platform || st.version);
+  };
+
+  const query = () => {
+    const p = new URLSearchParams();
+    if (st.q) p.set('q', st.q);
+    if (st.filter !== 'all') p.set('filter', st.filter);
+    if (st.platform) p.set('platform', st.platform);
+    if (st.version) p.set('version', st.version);
+    p.set('sort', st.sort);
+    return p;
+  };
+
+  // Column headers that sort; clicking the active one flips name and install date.
+  const sortHead = (label, keys, cls = '') => {
+    const active = keys.includes(st.sort);
+    const dir = st.sort === 'name' || st.sort === 'oldest' ? 'ascending' : 'descending';
+    return h('th', {
+      class: `sortable ${cls}`, tabindex: '0', 'aria-sort': active ? dir : null, title: `Sort by ${label.toLowerCase()}`,
+      onclick: () => { st.sort = active && keys[1] ? keys[keys.indexOf(st.sort) ^ 1] : keys[0]; st.page = 1; changed(); },
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } },
+    }, h('span', null, label, icon(active && dir === 'ascending' ? 'chevronUp' : 'chevronDown')));
   };
 
   const load = async () => {
-    const qs = `q=${encodeURIComponent(q)}&filter=${filter}`;
-    exportBtn.href = `/api/admin/users.csv?${qs}`;
-    list.classList.add('loading-dim');
+    const my = ++seq;
+    const p = query();
+    exportBtn.href = `/api/admin/users.csv?${p}`;
+    p.set('page', st.page);
+    p.set('size', st.size);
+    table.classList.add('loading-dim');
     try {
-      const d = await api(`/api/admin/users?${qs}&page=${page}`);
-      list.replaceChildren(d.rows.length ? h('div', { class: 'table-wrap' }, h('table', null,
+      const d = await api(`/api/admin/users?${p}`);
+      if (my !== seq) return;
+      facets = d.facets;
+      paintControls();
+      const pages = Math.max(1, Math.ceil(d.total / d.pageSize));
+      if (st.page > pages) { st.page = pages; changed(); return; }
+      table.replaceChildren(d.rows.length ? h('table', null,
         h('thead', null, h('tr', null,
-          h('th', null, 'User'), h('th', null, 'Version'), h('th', { class: 'hide-sm' }, 'Windows'),
-          h('th', { class: 'r' }, 'Downloads'), h('th', { class: 'r' }, 'Data'), h('th', { class: 'r hide-sm' }, 'Time used'), h('th', null, 'Last seen'))),
-        h('tbody', null, d.rows.map((r) => h('tr', { class: 'click', tabindex: '0', onclick: () => userDetail(r), onkeydown: (e) => { if (e.key === 'Enter') userDetail(r); } },
-          h('td', null, h('div', { class: 'who' }, h('b', null, r.name || 'Not registered'), h('span', null, r.email || `Install ${r.install.slice(0, 8)}`))),
-          h('td', null, r.version ? `v${r.version}` : '—'),
-          h('td', { class: 'hide-sm' }, r.os ? r.os.split(' (')[0] : '—'),
-          h('td', { class: 'r' }, fmtNum(r.jobs)),
-          h('td', { class: 'r' }, fmtBytes(r.bytes)),
-          h('td', { class: 'r hide-sm' }, fmtDuration(r.seconds)),
-          h('td', null, status(r)))))))
-        : h('div', { class: 'empty' }, q || filter !== 'all' ? 'No one matches.' : 'No installs yet.'));
-      const from = d.total ? (page - 1) * d.pageSize + 1 : 0, to = Math.min(d.total, page * d.pageSize);
+          sortHead('User', ['name', 'name_desc']),
+          h('th', { class: 'hide-sm' }, 'Platform'),
+          h('th', { class: 'hide-sm' }, 'Version'),
+          sortHead('Downloads', ['downloads'], 'r hide-xs'),
+          sortHead('Data', ['data'], 'r'),
+          sortHead('Time in app', ['time'], 'r hide-sm'),
+          sortHead('Installed', ['newest', 'oldest'], 'hide-sm'),
+          sortHead('Last seen', ['recent']))),
+        h('tbody', null, d.rows.map((r) => h('tr', {
+          class: 'click', tabindex: '0', dataset: { install: r.install },
+          onclick: () => openUser(r.install), onkeydown: (e) => { if (e.key === 'Enter') openUser(r.install); },
+        },
+        h('td', null, h('div', { class: 'who' }, avatar(r.name, r.email),
+          h('div', null, h('b', null, r.name || 'Not signed up'), h('span', null, r.email || `Install ${r.install.slice(0, 8)}`)))),
+        h('td', { class: 'hide-sm' }, platformEl(r)),
+        h('td', { class: 'hide-sm' }, r.version ? `v${r.version}` : '—'),
+        h('td', { class: 'r hide-xs' }, fmtNum(r.jobs)),
+        h('td', { class: 'r' }, fmtBytes(r.bytes)),
+        h('td', { class: 'r hide-sm' }, fmtDuration(r.seconds)),
+        h('td', { class: 'hide-sm', title: fmtDate(r.installedAt || r.firstSeen) }, fmtDate(r.installedAt || r.firstSeen, false)),
+        h('td', null, userStatus(r))))))
+        : h('div', { class: 'empty' }, icon('users'), st.q || st.filter !== 'all' || st.platform || st.version ? 'No one matches these filters.' : 'No installs yet.'));
+      const from = d.total ? (st.page - 1) * d.pageSize + 1 : 0, to = Math.min(d.total, st.page * d.pageSize);
       pager.replaceChildren(
-        h('span', null, `${fmtNum(from)}–${fmtNum(to)} of ${fmtNum(d.total)}`),
-        h('button', { class: 'btn small', type: 'button', disabled: page <= 1, onclick: () => { page--; load(); } }, 'Previous'),
-        h('button', { class: 'btn small', type: 'button', disabled: to >= d.total, onclick: () => { page++; load(); } }, 'Next'));
+        h('span', null, d.total ? `${fmtNum(from)}–${fmtNum(to)} of ${plural(d.total, 'person', )}`.replace(/persons$/, 'people') : 'No results'),
+        h('div', { class: 'toolbar' },
+          h('label', { class: 'check', style: 'gap:6px;color:var(--text-2)' }, 'Rows',
+            h('select', { 'aria-label': 'Rows per page', onchange: (e) => { st.size = Number(e.target.value); st.page = 1; changed(); } },
+              [25, 50, 100].map((n) => h('option', { value: n, selected: st.size === n }, String(n))))),
+          h('span', { class: 'faint' }, `Page ${fmtNum(st.page)} of ${fmtNum(pages)}`),
+          h('button', { class: 'btn small', type: 'button', disabled: st.page <= 1, onclick: () => { st.page--; changed(); } }, 'Previous'),
+          h('button', { class: 'btn small', type: 'button', disabled: to >= d.total, onclick: () => { st.page++; changed(); } }, 'Next')));
+      markUpdated();
     } catch (err) {
-      if (err.status !== 401) list.replaceChildren(h('div', { class: 'empty' }, err.message));
+      if (err.status !== 401 && my === seq) table.replaceChildren(h('div', { class: 'empty' }, err.message));
     } finally {
-      list.classList.remove('loading-dim');
+      if (my === seq) table.classList.remove('loading-dim');
     }
   };
 
-  search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { q = search.value.trim(); page = 1; load(); }, 300); });
-  filterSel.addEventListener('change', () => { filter = filterSel.value; page = 1; load(); });
+  function changed() {
+    setParams({
+      q: st.q || null, filter: st.filter === 'all' ? null : st.filter, platform: st.platform || null, version: st.version || null,
+      sort: st.sort === 'recent' ? null : st.sort, page: st.page > 1 ? st.page : null, size: st.size === 50 ? null : st.size,
+    });
+    paintControls();
+    return load();
+  }
+
+  platformSel.addEventListener('change', () => { st.platform = platformSel.value; st.page = 1; changed(); });
+  versionSel.addEventListener('change', () => { st.version = versionSel.value; st.page = 1; changed(); });
+  sortSel.addEventListener('change', () => { st.sort = sortSel.value; st.page = 1; changed(); });
+  paintControls();
   await load();
-  return () => clearTimeout(timer);
+  return { refresh: load };
 }
 
-function userDetail(r) {
-  const row = (k, v) => [h('dt', null, k), h('dd', null, v)];
-  modal({
-    title: r.name || 'Not registered',
-    body: h('dl', { class: 'kv' },
-      row('Email', r.email ? h('a', { href: `mailto:${encodeURIComponent(r.email).replace(/%40/g, '@')}` }, r.email) : '—'),
-      row('Registered', r.registeredAt ? fmtDate(r.registeredAt) : 'No'),
-      row('Install ID', h('span', { class: 'mono' }, r.install)),
-      row('Installed', fmtDate(r.installedAt || r.firstSeen)),
-      row('Last seen', `${fmtDate(r.lastSeen)} (${timeAgo(r.lastSeen)})`),
-      row('App version', r.version ? `v${r.version}` : '—'),
-      row('Windows', r.os || '—'),
-      row('Installed from', r.source || '—'),
-      row('Sessions', `${fmtNum(r.sessions)} · ${fmtDuration(r.seconds)} in the app`),
-      row('Links added', fmtNum(r.links)),
-      row('Downloads', `${fmtNum(r.jobs)} · ${fmtNum(r.files)} files · ${fmtBytes(r.bytes)}`),
-      row('Usage stats', r.stats ? 'Shared' : 'Turned off by the user')),
-    actions: [{ label: 'Close', run: (close) => close() }],
-  });
+// ---- One user, in a side panel
+
+let drawer = null;
+
+function closeUser() {
+  if (!drawer) return;
+  drawer.close();
 }
+
+async function openUser(id) {
+  if (!/^[0-9a-f]{32}$/i.test(id || '')) return;
+  drawer?.close({ keepParam: true });
+  setParams({ user: id });
+  const prevFocus = document.activeElement;
+  const head = h('div', { class: 'drawer-head' }, h('span', { class: 'skel', style: 'width:52px;height:52px;border-radius:50%' }),
+    h('div', { class: 't' }, h('span', { class: 'skel', style: 'height:18px;width:60%' })),
+    h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close', onclick: () => close() }, icon('x')));
+  const body = h('div', { class: 'drawer-body' }, ...skeletons(3, 'skel-tile'));
+  const panel = h('aside', { class: 'drawer', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'User' }, head, body);
+  const scrim = h('div', { class: 'scrim', onclick: () => close() });
+  const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal-back')) close(); };
+  let log = null;
+  function close({ keepParam = false } = {}) {
+    scrim.remove(); panel.remove(); log?.destroy();
+    document.removeEventListener('keydown', onKey);
+    document.body.classList.remove('locked');
+    for (const tr of document.querySelectorAll('tr.selected')) tr.classList.remove('selected');
+    if (drawer?.panel === panel) drawer = null;
+    if (!keepParam) setParams({ user: null });
+    prevFocus?.focus?.();
+  }
+  drawer = { close, panel };
+  document.body.append(scrim, panel);
+  document.body.classList.add('locked');
+  document.addEventListener('keydown', onKey);
+  document.querySelector(`tr[data-install="${id}"]`)?.classList.add('selected');
+  setTimeout(() => head.querySelector('button')?.focus(), 30);
+
+  try {
+    const d = await api(`/api/admin/users/${id}`);
+    if (drawer?.panel !== panel) return;
+    const r = d.user;
+    head.replaceChildren(avatar(r.name, r.email, 'lg'),
+      h('div', { class: 't' }, h('h2', null, r.name || 'Not signed up'), h('span', null, r.email || `Install ${r.install.slice(0, 8)}`)),
+      userStatus(r),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close', onclick: () => close() }, icon('x')));
+    log = activityLog({ query: () => ({ install: r.install }), showUser: false, pageSize: 30, emptyText: 'Nothing recorded for this person yet.' });
+    const row = (k, v) => [h('dt', null, k), h('dd', null, v)];
+    body.replaceChildren(...[
+      h('div', { class: 'toolbar' },
+        r.email ? h('a', { class: 'btn small', href: `mailto:${encodeURIComponent(r.email).replace(/%40/g, '@')}` }, icon('mail'), 'Email') : null,
+        r.email ? h('button', { class: 'btn small', type: 'button', onclick: () => copyText(r.email, 'Email copied') }, icon('copy'), 'Copy email') : null,
+        h('button', { class: 'btn small', type: 'button', onclick: () => copyText(r.install, 'Install ID copied') }, icon('copy'), 'Copy install ID')),
+      h('div', { class: 'tiles' },
+        tileEl('Downloads', fmtNum(r.jobs)), tileEl('Files', fmtNum(r.files)), tileEl('Data', fmtBytes(r.bytes)),
+        tileEl('Time in app', fmtDuration(r.seconds)), tileEl('Links added', fmtNum(r.links)), tileEl('Sessions', fmtNum(r.sessions))),
+      h('div', null, h('h3', null, 'Details'), h('dl', { class: 'kv' },
+        row('Signed up', r.registeredAt ? fmtDate(r.registeredAt) : 'Not yet'),
+        row('Installed', fmtDate(r.installedAt || r.firstSeen)),
+        row('Last seen', `${fmtDate(r.lastSeen)} (${timeAgo(r.lastSeen)})`),
+        row('Last download', d.lastDownload ? `${fmtDate(d.lastDownload)} (${timeAgo(d.lastDownload)})` : 'None yet'),
+        row('App version', r.version ? `v${r.version}` : '—'),
+        row('System', r.os || '—'),
+        row('Installed from', { installer: 'Windows installer', portable: r.platform === 'mac' ? 'Mac app' : 'Portable copy', app: 'The app' }[r.source] || r.source || '—'),
+        row('Problems', d.problems ? plural(d.problems, 'problem') : 'None reported'),
+        row('Install ID', h('span', { class: 'mono' }, r.install)))),
+      d.tickets.length ? h('div', null, h('h3', null, `Support messages · ${d.tickets.length}`),
+        h('div', { class: 'feed' }, d.tickets.map((t) => h('div', { class: 'feed-item' },
+          h('span', { class: 'feed-icon info' }, icon('support')),
+          h('div', { class: 'feed-text' }, h('a', { class: 'linkish', href: '#support' }, t.topic || 'Message'), h('div', { class: 'feed-meta' }, h('span', null, fmtDate(t.createdAt)))),
+          h('span', { class: `badge ${{ open: 'info', answered: 'good', closed: 'plain' }[t.status]}` }, t.status[0].toUpperCase() + t.status.slice(1)))))) : null,
+      h('div', null, h('h3', null, 'Activity'), log.el)].filter(Boolean));
+    log.reload();
+  } catch (err) {
+    if (err.status === 401 || drawer?.panel !== panel) return;
+    body.replaceChildren(h('div', { class: 'empty' }, icon('alert'), err.status === 404 ? 'This person isn’t in the records any more.' : err.message));
+  }
+}
+
 
 // ---- Support
 
@@ -1015,7 +1497,7 @@ async function teamPage(main) {
       list.replaceChildren(h('div', { class: 'table-wrap' }, h('table', null,
         h('thead', null, h('tr', null, h('th', null, 'Person'), h('th', null, 'Role'), h('th', null, 'Last sign-in'), h('th', null, ''))),
         h('tbody', null, d.rows.map((m) => h('tr', null,
-          h('td', null, h('div', { class: 'who' }, h('b', null, m.name || m.email), h('span', null, m.email))),
+          h('td', null, h('div', { class: 'who' }, avatar(m.name, m.email), h('div', null, h('b', null, m.name || m.email), h('span', null, m.email)))),
           h('td', null, h('span', { class: `badge ${m.role === 'owner' ? 'info' : 'plain'}` }, m.role[0].toUpperCase() + m.role.slice(1))),
           h('td', null, m.lastLogin ? timeAgo(m.lastLogin) : 'Never'),
           h('td', { class: 'r' }, owner && m.role !== 'owner' ? h('button', { class: 'btn small danger', type: 'button', onclick: async (e) => {
@@ -1092,12 +1574,14 @@ function changePassword() {
 
 const PAGES = {
   overview: ['Overview', overviewPage],
+  activity: ['Activity', activityPage],
   users: ['Users', usersPage],
   support: ['Support', supportPage],
   releases: ['Updates', releasesPage],
   announcements: ['Announcements', announcementsPage],
   team: ['Team', teamPage],
 };
+const NAV = [['Insights', ['overview', 'activity', 'users']], ['Manage', ['support', 'releases', 'announcements']], ['Settings', ['team']]];
 
 function setCount(n) {
   state.openTickets = n;
@@ -1106,39 +1590,70 @@ function setCount(n) {
 }
 
 function buildNav() {
-  $('#nav').replaceChildren(...Object.entries(PAGES).map(([key, [label]]) =>
-    h('a', { href: `#${key}`, dataset: { page: key }, title: label }, icon(key), h('span', { class: 'label' }, label),
-      key === 'support' ? h('span', { class: 'count', hidden: !state.openTickets }, String(state.openTickets)) : null)));
+  $('#nav').replaceChildren(...NAV.flatMap(([group, keys]) => [
+    h('div', { class: 'nav-group' }, group),
+    ...keys.map((key) => h('a', { href: `#${key}`, dataset: { page: key }, title: PAGES[key][0] }, icon(key), h('span', { class: 'label' }, PAGES[key][0]),
+      key === 'support' ? h('span', { class: 'count', hidden: !state.openTickets }, String(state.openTickets)) : null)),
+  ]));
 }
 
-let renderSeq = 0;
+const navOpen = (open) => {
+  $('#shell').classList.toggle('nav-open', open);
+  $('.scrim.nav')?.remove();
+  if (open) document.body.append(h('div', { class: 'scrim nav', onclick: () => navOpen(false) }));
+};
+
+let renderSeq = 0, lastKey = null;
 async function render() {
   if (!state.user) return;
-  const key = PAGES[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';
+  const { key, params } = route();
+  navOpen(false);
   for (const a of document.querySelectorAll('#nav a')) {
     if (a.dataset.page === key) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   }
   document.title = `${PAGES[key][0]} · Eastape Downloader Admin`;
+  $('#crumb').replaceChildren(icon(key), h('b', null, PAGES[key][0]));
+  drawer?.close({ keepParam: true });
   state.cleanup?.();
   state.cleanup = null;
+  state.refresh = null;
   tip.hide();
+  if (key !== lastKey) { window.scrollTo(0, 0); lastKey = key; }
   const seq = ++renderSeq;
   const main = $('#main');
   try {
-    const cleanup = await PAGES[key][1](main);
-    if (seq === renderSeq) state.cleanup = cleanup || null;
-    else cleanup?.();
+    const out = await PAGES[key][1](main);
+    const cleanup = typeof out === 'function' ? out : out?.cleanup;
+    if (seq === renderSeq) {
+      state.cleanup = cleanup || null;
+      state.refresh = out?.refresh || null;
+      markUpdated();
+      if (params.get('user')) openUser(params.get('user'));
+    } else cleanup?.();
   } catch (err) {
-    if (err.status !== 401) main.replaceChildren(h('div', { class: 'card empty' }, err.message || 'Something went wrong.'));
+    if (err.status !== 401) main.replaceChildren(h('div', { class: 'card empty' }, icon('alert'), err.message || 'Something went wrong.'));
   }
+}
+
+// ---- theme: system, light or dark, remembered in this browser
+function currentTheme() {
+  try { return localStorage.getItem('eastape-admin-theme') || 'system'; } catch { return 'system'; }
+}
+function setTheme(t) {
+  try { if (t === 'system') localStorage.removeItem('eastape-admin-theme'); else localStorage.setItem('eastape-admin-theme', t); } catch { /* not remembered */ }
+  if (t === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  render();
 }
 
 function showLogin(message) {
   state.cleanup?.();
   state.cleanup = null;
+  state.refresh = null;
   state.user = null;
-  for (const el of document.querySelectorAll('.modal-back, .menu')) el.remove();
+  drawer?.close({ keepParam: true });
+  for (const el of document.querySelectorAll('.modal-back, .menu, .scrim')) el.remove();
   $('#boot').hidden = true;
   $('#shell').hidden = true;
   $('#login').hidden = false;
@@ -1152,7 +1667,8 @@ function enter(user) {
   $('#login').hidden = true;
   $('#shell').hidden = false;
   $('#meName').textContent = user.name || user.email.split('@')[0];
-  $('#meEmail').textContent = user.email;
+  $('#meEmail').textContent = `${user.email} · ${user.role[0].toUpperCase()}${user.role.slice(1)}`;
+  $('#meAvatar').textContent = initials(user.name, user.email);
   buildNav();
   render();
 }
@@ -1175,11 +1691,58 @@ $('#loginForm').addEventListener('submit', async (e) => {
 });
 
 $('#meMenu').append(icon('more'));
-$('#meMenu').addEventListener('click', (e) => menu(e.currentTarget, [
-  { icon: 'key', label: 'Change password', run: changePassword },
-  { icon: 'logout', label: 'Sign out', run: async () => { try { await api('/api/admin/logout', { method: 'POST' }); } catch { /* ignore */ } showLogin(); } },
-]));
+$('#meMenu').addEventListener('click', (e) => {
+  const t = currentTheme();
+  menu(e.currentTarget, [
+    { heading: 'Theme' },
+    { icon: 'monitor', label: 'Same as system', checked: t === 'system', run: () => setTheme('system') },
+    { icon: 'sun', label: 'Light', checked: t === 'light', run: () => setTheme('light') },
+    { icon: 'moon', label: 'Dark', checked: t === 'dark', run: () => setTheme('dark') },
+    { sep: true },
+    { icon: 'key', label: 'Change password', run: changePassword },
+    { icon: 'keyboard', label: 'Keyboard shortcuts', run: shortcutsHelp },
+    { icon: 'logout', label: 'Sign out', run: async () => { try { await api('/api/admin/logout', { method: 'POST' }); } catch { /* ignore */ } showLogin(); } },
+  ]);
+});
+
+$('#menuBtn').append(icon('menu'));
+$('#menuBtn').addEventListener('click', () => navOpen(!$('#shell').classList.contains('nav-open')));
+$('#refreshIcon').replaceWith(icon('refresh'));
+$('#refreshBtn').addEventListener('click', refreshNow);
+
+function shortcutsHelp() {
+  const row = (keys, what) => [h('dt', null, keys.map((k) => h('kbd', null, k)), ''), h('dd', null, what)];
+  modal({
+    title: 'Keyboard shortcuts',
+    body: h('dl', { class: 'kv' },
+      row(['R'], 'Refresh this page'), row(['/'], 'Search'), row(['Esc'], 'Close a panel or dialog'),
+      row(['G', 'O'], 'Overview'), row(['G', 'A'], 'Activity'), row(['G', 'U'], 'Users'), row(['G', 'S'], 'Support')),
+    actions: [{ label: 'Close', run: (close) => close() }],
+  });
+}
+
+// R refreshes, / searches, G then a letter goes to a page.
+let gPressed = 0;
+document.addEventListener('keydown', (e) => {
+  if (!state.user || e.ctrlKey || e.metaKey || e.altKey) return;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  if (typing || document.querySelector('.modal-back')) return;
+  const k = e.key.toLowerCase();
+  if (Date.now() - gPressed < 1200) {
+    const to = { o: 'overview', a: 'activity', u: 'users', s: 'support', p: 'releases', n: 'announcements', t: 'team' }[k];
+    gPressed = 0;
+    if (to) { e.preventDefault(); location.hash = `#${to}`; }
+    return;
+  }
+  if (k === 'g') gPressed = Date.now();
+  else if (k === 'r') { e.preventDefault(); refreshNow(); } else if (k === '/') {
+    const box = document.querySelector('#main [data-search]');
+    if (box) { e.preventDefault(); box.focus(); }
+  }
+});
+
 window.addEventListener('hashchange', render);
+setInterval(paintUpdated, 5000);
 
 (async () => {
   try {

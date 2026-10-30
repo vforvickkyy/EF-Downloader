@@ -1,6 +1,7 @@
 import { db } from '../db.js';
 import { json, int } from '../http.js';
 import { requireAdmin } from '../auth.js';
+import { queryActivity } from './activity.js';
 
 const N = (v) => Number(v || 0);
 
@@ -29,16 +30,9 @@ async function liveNumbers(sql, tz) {
   };
 }
 
-async function recentActivity(sql, limit) {
-  const rows = await sql`
-    select e.type, e.ts, e.props, e.install_id, e.app_version, u.name
-    from events e
-    left join installs i on i.id = e.install_id
-    left join users u on u.id = i.user_id
-    where e.type <> 'heartbeat'
-    order by e.ts desc
-    limit ${limit}`;
-  return rows.map((r) => ({ type: r.type, ts: r.ts, props: r.props, install: r.install_id.slice(0, 8), version: r.app_version, name: r.name || null }));
+async function recentActivity(limit) {
+  const { items, newest } = await queryActivity({ limit });
+  return { items, newest };
 }
 
 /** GET /api/admin/live — the numbers that refresh every few seconds. */
@@ -47,8 +41,8 @@ export async function live(request) {
   const url = new URL(request.url);
   const sql = db();
   const tz = await safeTz(sql, timezone(url));
-  const [numbers, activity] = await Promise.all([liveNumbers(sql, tz), recentActivity(sql, 25)]);
-  return json({ ok: true, live: numbers, activity, serverTime: new Date().toISOString() });
+  const [numbers, activity] = await Promise.all([liveNumbers(sql, tz), recentActivity(10)]);
+  return json({ ok: true, live: numbers, activity: activity.items, serverTime: new Date().toISOString() });
 }
 
 async function safeTz(sql, tz) {
@@ -131,9 +125,46 @@ export async function overview(request) {
   const linkKinds = await sql`
     select k as name, sum(v::numeric) as n from events, jsonb_each_text(coalesce(props->'kinds', '{}'::jsonb)) as t(k, v)
     where type = 'scan' and ts > now() - interval '30 days' group by 1 order by 2 desc`;
+  const platforms = await sql`
+    select case when os ilike 'macOS%' then 'macOS' when os ilike 'Windows%' then 'Windows' else 'Other' end as name, count(*) as n
+    from installs where last_seen > now() - interval '30 days' group by 1 order by 2 desc`;
   const top = (rows) => rows.map((r) => ({ name: r.name, n: N(r.n) }));
 
-  const [numbers, activity] = await Promise.all([liveNumbers(sql, tz), recentActivity(sql, 25)]);
+  // The same numbers for this period and the one before it, for the trend arrows.
+  const prevSince = sql`(date_trunc('day', now() at time zone ${tz}) - ${`${2 * days - 1} days`}::interval) at time zone ${tz}`;
+  const [ev] = await sql`
+    select count(distinct install_id) filter (where ts >= ${since}) as active_cur,
+           count(distinct install_id) filter (where ts < ${since}) as active_prev,
+           coalesce(sum((props->>'bytes')::numeric) filter (where type = 'job' and ts >= ${since}), 0) as bytes_cur,
+           coalesce(sum((props->>'bytes')::numeric) filter (where type = 'job' and ts < ${since}), 0) as bytes_prev,
+           count(*) filter (where type = 'job' and ts >= ${since}) as jobs_cur,
+           count(*) filter (where type = 'job' and ts < ${since}) as jobs_prev,
+           coalesce(sum((props->>'filesDone')::numeric) filter (where type = 'job' and ts >= ${since}), 0) as files_cur,
+           coalesce(sum((props->>'filesDone')::numeric) filter (where type = 'job' and ts < ${since}), 0) as files_prev,
+           count(*) filter (where type = 'scan' and ts >= ${since}) as links_cur,
+           count(*) filter (where type = 'scan' and ts < ${since}) as links_prev,
+           coalesce(sum((props->>'durationSec')::numeric) filter (where type = 'session_end' and ts >= ${since}), 0) as seconds_cur,
+           coalesce(sum((props->>'durationSec')::numeric) filter (where type = 'session_end' and ts < ${since}), 0) as seconds_prev
+    from events where ts >= ${prevSince}`;
+  const [ins] = await sql`
+    select count(*) filter (where first_seen >= ${since}) as cur, count(*) filter (where first_seen < ${since}) as prev
+    from installs where first_seen >= ${prevSince}`;
+  const [reg] = await sql`
+    select count(*) filter (where created_at >= ${since}) as cur, count(*) filter (where created_at < ${since}) as prev
+    from users where created_at >= ${prevSince}`;
+  const pair = (cur, prev) => ({ current: N(cur), previous: N(prev) });
+  const compare = {
+    activeUsers: pair(ev.active_cur, ev.active_prev),
+    installs: pair(ins.cur, ins.prev),
+    registrations: pair(reg.cur, reg.prev),
+    bytes: pair(ev.bytes_cur, ev.bytes_prev),
+    downloads: pair(ev.jobs_cur, ev.jobs_prev),
+    files: pair(ev.files_cur, ev.files_prev),
+    links: pair(ev.links_cur, ev.links_prev),
+    seconds: pair(ev.seconds_cur, ev.seconds_prev),
+  };
+
+  const [numbers, activity] = await Promise.all([liveNumbers(sql, tz), recentActivity(10)]);
   return json({
     ok: true,
     tz,
@@ -147,7 +178,9 @@ export async function overview(request) {
       avgSession: N(totals.avg_session), avgSpeed: N(totals.avg_speed), scanSuccess: totals.scan_success === null ? null : N(totals.scan_success),
     },
     series: [...byDay.values()],
-    versions: top(versions), systems: top(systems), errors: top(errors), features: top(features), linkKinds: top(linkKinds),
-    activity,
+    compare,
+    versions: top(versions), systems: top(systems), platforms: top(platforms), errors: top(errors), features: top(features), linkKinds: top(linkKinds),
+    activity: activity.items,
+    serverTime: new Date().toISOString(),
   });
 }

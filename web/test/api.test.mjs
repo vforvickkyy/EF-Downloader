@@ -231,6 +231,115 @@ test('CSV export guards against spreadsheet formulas', { skip }, async () => {
   assert.match(r.data, /"'=HYPERLINK\(""x""\)"/);
 });
 
+test('users can be sorted, filtered by platform and version, and opened', { skip }, async () => {
+  const MAC = 'f'.repeat(32);
+  const now = new Date().toISOString();
+  const r = await app('POST', '/api/v1/ingest', {
+    installId: MAC, appVersion: '1.4.0', os: 'macOS 15.1 (Apple silicon)', source: 'portable',
+    events: [
+      { type: 'first_run', ts: now, props: { source: 'portable' } },
+      { type: 'register', ts: now, props: { name: 'Zed', email: 'zed@example.com' } },
+      { type: 'job', ts: now, props: { result: 'done', filesDone: 3, bytes: 9_000_000, durationSec: 4 } },
+    ],
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+
+  const byData = await owner.get('/api/admin/users?sort=data');
+  assert.equal(byData.data.sort, 'data');
+  assert.equal(byData.data.rows[0].install, MAC);
+  const bytes = byData.data.rows.map((x) => x.bytes);
+  assert.deepEqual(bytes, [...bytes].sort((a, b) => b - a));
+
+  const byName = await owner.get('/api/admin/users?sort=name');
+  const names = byName.data.rows.map((x) => x.name);
+  const named = names.filter(Boolean);
+  assert.deepEqual(named, [...named].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())));
+  assert.ok(names.indexOf(null) === -1 || names.slice(names.indexOf(null)).every((x) => x === null), 'unregistered last');
+
+  const mac = await owner.get('/api/admin/users?platform=mac');
+  assert.equal(mac.data.total, 1);
+  assert.equal(mac.data.rows[0].platform, 'mac');
+  const win = await owner.get('/api/admin/users?platform=windows');
+  assert.ok(win.data.rows.length > 0 && win.data.rows.every((x) => x.platform === 'windows'));
+  const v = await owner.get('/api/admin/users?version=1.4.0');
+  assert.ok(v.data.rows.every((x) => x.version === '1.4.0'));
+  assert.equal((await owner.get('/api/admin/users?filter=online')).data.rows.every((x) => Date.now() - new Date(x.lastSeen) < 15 * 60000), true);
+
+  const f = byData.data.facets;
+  assert.equal(f.mac, 1);
+  assert.ok(f.windows >= 1 && f.all >= f.registered);
+  assert.ok(f.versions.some((x) => x.name === '1.4.0'));
+  assert.equal((await owner.get('/api/admin/users?sort=nonsense&size=25')).data.sort, 'recent');
+  assert.equal((await owner.get('/api/admin/users?size=25')).data.pageSize, 25);
+
+  const one = await owner.get(`/api/admin/users/${MAC}`);
+  assert.equal(one.status, 200);
+  assert.equal(one.data.user.name, 'Zed');
+  assert.equal(one.data.user.platform, 'mac');
+  assert.ok(Array.isArray(one.data.tickets));
+  assert.equal((await owner.get(`/api/admin/users/${'0'.repeat(32)}`)).status, 404);
+  assert.equal((await owner.get('/api/admin/users/not-an-id')).status, 400);
+});
+
+test('activity pages through every event, newest first, and finds newer ones', { skip }, async () => {
+  const id = '9'.repeat(32);
+  const sql = db();
+  await sql`insert into installs (id, app_version, os, source) values (${id}, '1.4.0', 'Windows 11 (build 22631)', 'installer') on conflict do nothing`;
+  // 130 events, some sharing a timestamp, plus heartbeats that must not show.
+  const base = Date.now() - 3_600_000;
+  for (let i = 0; i < 130; i++) {
+    const ts = new Date(base + Math.floor(i / 3) * 1000).toISOString();
+    await sql`insert into events (install_id, type, ts, props) values (${id}, ${i % 5 === 0 ? 'job' : 'scan'}, ${ts}, ${sql.json({ ok: true, i })})`;
+    if (i % 10 === 0) await sql`insert into events (install_id, type, ts) values (${id}, 'heartbeat', ${ts})`;
+  }
+
+  const seen = [];
+  let before = '';
+  for (let pages = 0; pages < 10; pages++) {
+    const r = await owner.get(`/api/admin/activity?install=${id}&limit=50${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    seen.push(...r.data.items);
+    if (!r.data.next) break;
+    before = r.data.next;
+  }
+  assert.equal(seen.length, 130);
+  assert.equal(new Set(seen.map((e) => e.id)).size, 130, 'no event twice');
+  assert.ok(seen.every((e) => e.type !== 'heartbeat' && e.installId === id));
+  for (let i = 1; i < seen.length; i++) assert.ok(new Date(seen[i - 1].ts) >= new Date(seen[i].ts), 'newest first');
+
+  const jobs = await owner.get(`/api/admin/activity?install=${id}&group=downloads&limit=100`);
+  assert.equal(jobs.data.items.length, 26);
+  assert.ok(jobs.data.items.every((e) => e.type === 'job'));
+
+  const first = await owner.get(`/api/admin/activity?install=${id}&limit=5`);
+  await sql`insert into events (install_id, type, ts, props) values (${id}, 'error', now(), ${sql.json({ kind: 'network' })})`;
+  const fresh = await owner.get(`/api/admin/activity?install=${id}&after=${encodeURIComponent(first.data.newest)}`);
+  assert.equal(fresh.data.items.length, 1);
+  assert.equal(fresh.data.items[0].type, 'error');
+  const none = await owner.get(`/api/admin/activity?install=${id}&after=${encodeURIComponent(fresh.data.newest)}`);
+  assert.equal(none.data.items.length, 0);
+  assert.equal(none.data.newest, fresh.data.newest);
+
+  assert.equal((await owner.get('/api/admin/activity?before=yesterday')).status, 400);
+  assert.equal((await owner.get('/api/admin/activity?group=everything')).status, 400);
+  assert.equal((await owner.get('/api/admin/activity?install=xyz')).status, 400);
+  assert.ok((await owner.get('/api/admin/activity?q=zed')).data.items.every((e) => e.name === 'Zed'));
+  assert.equal((await call('GET', '/api/admin/activity')).status, 401);
+});
+
+test('overview compares the period with the one before', { skip }, async () => {
+  const o = await owner.get('/api/admin/overview?days=7');
+  const c = o.data.compare;
+  for (const k of ['activeUsers', 'installs', 'registrations', 'bytes', 'downloads', 'files', 'links', 'seconds']) {
+    assert.equal(typeof c[k].current, 'number', k);
+    assert.equal(typeof c[k].previous, 'number', k);
+  }
+  assert.ok(c.bytes.current >= 14_000_000);
+  assert.ok(o.data.platforms.some((p) => p.name === 'macOS'));
+  assert.ok(o.data.activity.length <= 10);
+  assert.ok(o.data.activity[0].installId);
+});
+
 test('support tickets can be answered with a note', { skip }, async () => {
   const list = await owner.get('/api/admin/support?status=open');
   const id = list.data.rows[0].id;
@@ -382,7 +491,9 @@ test('daily cron needs its secret and saves totals', { skip }, async () => {
   assert.equal(r.status, 200);
   assert.equal(r.data.removedEvents, 1);
   const [bytes] = await sql`select value from daily_stats where metric = 'bytes'`;
-  assert.equal(Number(bytes.value), 5_000_000);
+  const [expected] = await sql`select sum((props->>'bytes')::numeric) as n from events where type = 'job'`;
+  assert.ok(Number(expected.n) >= 5_000_000);
+  assert.equal(Number(bytes.value), Number(expected.n));
 
   // Without CRON_SECRET it runs, but not twice in a row.
   const saved = process.env.CRON_SECRET;

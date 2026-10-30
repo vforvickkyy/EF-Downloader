@@ -3,8 +3,9 @@ import { ingest } from './ingest.js';
 import { check } from './check.js';
 import { login, logout, me, changePassword } from './auth.js';
 import { overview, live } from './admin/stats.js';
+import { listActivity } from './admin/activity.js';
 import {
-  listUsers, exportUsers, listSupport, updateSupport,
+  listUsers, exportUsers, getUser, listSupport, updateSupport,
   listAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
   listTeam, addTeamMember, removeTeamMember,
 } from './admin/manage.js';
@@ -27,6 +28,8 @@ const routes = [
   ['GET', '/api/admin/live', live],
   ['GET', '/api/admin/users', listUsers],
   ['GET', '/api/admin/users.csv', exportUsers],
+  ['GET', '/api/admin/users/:id', getUser],
+  ['GET', '/api/admin/activity', listActivity],
   ['GET', '/api/admin/support', listSupport],
   ['PATCH', '/api/admin/support/:id', updateSupport],
   ['GET', '/api/admin/releases', listReleases],

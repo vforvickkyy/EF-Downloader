@@ -8,49 +8,134 @@ const N = (v) => Number(v || 0);
 
 // ---------------------------------------------------------------- users
 
+function platformOf(os) {
+  if (!os) return null;
+  if (/^macOS/i.test(os)) return 'mac';
+  if (/^Windows/i.test(os)) return 'windows';
+  return 'other';
+}
+
 function userRow(r) {
   return {
     install: r.id, name: r.name, email: r.email, firstSeen: r.first_seen, lastSeen: r.last_seen,
-    installedAt: r.installed_at, version: r.app_version, os: r.os, source: r.source, stats: r.stats_enabled,
+    installedAt: r.installed_at, version: r.app_version, os: r.os, platform: platformOf(r.os), source: r.source, stats: r.stats_enabled,
     state: r.last_state, sessions: N(r.sessions), seconds: N(r.active_seconds), links: N(r.links_scanned),
     jobs: N(r.jobs), files: N(r.files_downloaded), bytes: N(r.bytes_downloaded), registeredAt: r.registered_at,
   };
 }
 
+// How the users list can be sorted (the install ID breaks ties so pages never overlap).
+const USER_SORTS = {
+  recent: (sql) => sql`i.last_seen desc, i.id`,
+  newest: (sql) => sql`coalesce(i.installed_at, i.first_seen) desc, i.id`,
+  oldest: (sql) => sql`coalesce(i.installed_at, i.first_seen) asc, i.id`,
+  name: (sql) => sql`lower(u.name) asc nulls last, i.last_seen desc, i.id`,
+  name_desc: (sql) => sql`lower(u.name) desc nulls last, i.last_seen desc, i.id`,
+  data: (sql) => sql`i.bytes_downloaded desc, i.last_seen desc, i.id`,
+  downloads: (sql) => sql`i.jobs desc, i.last_seen desc, i.id`,
+  files: (sql) => sql`i.files_downloaded desc, i.last_seen desc, i.id`,
+  time: (sql) => sql`i.active_seconds desc, i.last_seen desc, i.id`,
+};
+const USER_FILTERS = ['all', 'registered', 'unregistered', 'active', 'online', 'downloading'];
+
+function userQuery(url) {
+  const p = url.searchParams;
+  const sort = USER_SORTS[p.get('sort')] ? p.get('sort') : 'recent';
+  const filter = USER_FILTERS.includes(p.get('filter')) ? p.get('filter') : 'all';
+  const platform = ['windows', 'mac'].includes(p.get('platform')) ? p.get('platform') : 'all';
+  const version = p.get('version') && VERSION_RE.test(p.get('version')) ? p.get('version') : '';
+  return { q: (p.get('q') || '').trim().slice(0, 100), sort, filter, platform, version };
+}
+
 async function queryUsers(url, { limit, offset }) {
-  const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
-  const filter = url.searchParams.get('filter') || 'all';
+  const { q, sort, filter, platform, version } = userQuery(url);
   const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
   const sql = db();
   const where = sql`
     where (${q} = '' or u.name ilike ${like} or u.email ilike ${like} or i.id ilike ${like})
       and (${filter} <> 'registered' or u.id is not null)
       and (${filter} <> 'unregistered' or u.id is null)
-      and (${filter} <> 'active' or i.last_seen > now() - interval '7 days')`;
+      and (${filter} <> 'active' or i.last_seen > now() - interval '7 days')
+      and (${filter} not in ('online', 'downloading') or i.last_seen > now() - interval '15 minutes')
+      and (${filter} <> 'downloading' or i.last_state = 'downloading')
+      and (${platform} <> 'windows' or i.os ilike 'Windows%')
+      and (${platform} <> 'mac' or i.os ilike 'macOS%')
+      and (${version} = '' or i.app_version = ${version})`;
   const rows = await sql`
     select i.*, u.name, u.email, u.created_at as registered_at
     from installs i left join users u on u.id = i.user_id
     ${where}
-    order by i.last_seen desc
+    order by ${USER_SORTS[sort](sql)}
     limit ${limit} offset ${offset}`;
   const [{ n }] = await sql`select count(*) as n from installs i left join users u on u.id = i.user_id ${where}`;
-  return { rows: rows.map(userRow), total: N(n) };
+  return { rows: rows.map(userRow), total: N(n), sort };
 }
 
-/** GET /api/admin/users?q=&filter=&page= */
+/** Counts for the filter controls, over everyone. */
+async function userFacets(sql) {
+  const [c] = await sql`
+    select count(*) as all,
+           count(user_id) as registered,
+           count(*) filter (where last_seen > now() - interval '7 days') as active,
+           count(*) filter (where last_seen > now() - interval '15 minutes') as online,
+           count(*) filter (where last_seen > now() - interval '15 minutes' and last_state = 'downloading') as downloading,
+           count(*) filter (where os ilike 'Windows%') as windows,
+           count(*) filter (where os ilike 'macOS%') as mac
+    from installs`;
+  const versions = await sql`
+    select app_version as name, count(*) as n from installs where app_version is not null
+    group by 1
+    order by case when app_version ~ '^[0-9]{1,6}(\\.[0-9]{1,6}){0,3}$' then string_to_array(app_version, '.')::int[] end desc nulls last, app_version desc
+    limit 30`;
+  return {
+    all: N(c.all), registered: N(c.registered), unregistered: N(c.all) - N(c.registered), active: N(c.active),
+    online: N(c.online), downloading: N(c.downloading), windows: N(c.windows), mac: N(c.mac),
+    versions: versions.map((v) => ({ name: v.name, n: N(v.n) })),
+  };
+}
+
+/** GET /api/admin/users?q=&filter=&platform=&version=&sort=&page=&size= */
 export async function listUsers(request) {
   await requireAdmin(request);
   const url = new URL(request.url);
+  const size = [25, 50, 100].includes(Number(url.searchParams.get('size'))) ? Number(url.searchParams.get('size')) : 50;
   const page = int(url.searchParams.get('page'), { min: 1, max: 100000, fallback: 1 });
-  const { rows, total } = await queryUsers(url, { limit: 50, offset: (page - 1) * 50 });
-  return json({ ok: true, rows, total, page, pageSize: 50 });
+  const [{ rows, total, sort }, facets] = await Promise.all([
+    queryUsers(url, { limit: size, offset: (page - 1) * size }),
+    userFacets(db()),
+  ]);
+  return json({ ok: true, rows, total, page, pageSize: size, sort, facets });
+}
+
+/** GET /api/admin/users/:id — one installation, with its support messages. */
+export async function getUser(request, { id }) {
+  await requireAdmin(request);
+  if (!/^[0-9a-f]{32}$/i.test(id)) throw new HttpError(400, 'Invalid install ID');
+  const sql = db();
+  const [r] = await sql`
+    select i.*, u.name, u.email, u.created_at as registered_at
+    from installs i left join users u on u.id = i.user_id where i.id = ${id.toLowerCase()}`;
+  if (!r) throw new HttpError(404, 'Not found');
+  const tickets = await sql`
+    select id, topic, status, created_at from support_tickets where install_id = ${r.id} order by created_at desc limit 20`;
+  const [agg] = await sql`
+    select count(*) filter (where type = 'error') as problems,
+           max(ts) filter (where type = 'job') as last_download
+    from events where install_id = ${r.id}`;
+  return json({
+    ok: true,
+    user: userRow(r),
+    problems: N(agg.problems),
+    lastDownload: agg.last_download,
+    tickets: tickets.map((t) => ({ id: N(t.id), topic: t.topic, status: t.status, createdAt: t.created_at })),
+  });
 }
 
 /** GET /api/admin/users.csv */
 export async function exportUsers(request) {
   await requireAdmin(request);
   const { rows } = await queryUsers(new URL(request.url), { limit: 100000, offset: 0 });
-  const cols = ['name', 'email', 'install', 'version', 'os', 'source', 'installedAt', 'firstSeen', 'lastSeen', 'sessions', 'seconds', 'links', 'jobs', 'files', 'bytes', 'stats'];
+  const cols = ['name', 'email', 'install', 'version', 'os', 'platform', 'source', 'installedAt', 'registeredAt', 'firstSeen', 'lastSeen', 'sessions', 'seconds', 'links', 'jobs', 'files', 'bytes', 'stats'];
   const cell = (v) => {
     const s = v instanceof Date ? v.toISOString() : v === null || v === undefined ? '' : String(v);
     const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s; // no spreadsheet formulas
